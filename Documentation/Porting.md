@@ -2,7 +2,7 @@
 
 Read this when a patch rejects on your tree, or when your kernel is 5.4, which has no
 ready series. Everything here comes from applying the series to Google's common kernels
-and eight vendor trees, and from booting one of them.
+and eight vendor trees, and from booting two of them.
 
 ## Start with the probe
 
@@ -42,7 +42,7 @@ Booted with systemd 259 and 262.
 the 4.14 series ported to 4.9 context, plus a statx syscall, which 4.9 never had and
 systemd 258 no longer does without, plus the 4.11 to 4.13 features systemd uses but does
 not need to boot. cgroup2 `nsdelegate` (4.13) is left out because Droidspaces mounts
-cgroup2 itself. Compile-tested on Google's tree and two more, not booted.
+cgroup2 itself. Booted on the Galaxy A01 with systemd 259 and 262.
 
 **Below 4.9.** Do not. statx, cgroup namespaces, ambient capabilities and the cgroup2 pids
 controller pile up, and the pidfd backport does not exist for them.
@@ -127,8 +127,8 @@ another series, these are the places vendors differ.
 
 ## Trees these patches were applied to
 
-Only the first was booted. The rest were apply checks on blobless clones, and the two
-Google trees also had their touched objects compiled.
+Only the first and the Galaxy A01 were booted. The rest were apply checks on blobless
+clones, and the Google trees also had their touched objects compiled.
 
 - Samsung exynos9820, `Kernels-by-ravindu644/samsung_kernel_exynos9820_extremerom`,
   4.14.356. Booted with Fedora 44 and Arch Linux ARM.
@@ -143,7 +143,8 @@ Google trees also had their touched objects compiled.
 - Samsung Galaxy S20, `LineageOS/android_kernel_samsung_universal9830`, 4.19.325, with
   four syscall table lines by hand.
 - Google `android-4.9-q`, 4.9.337.
-- Samsung Galaxy A01, `Kernels-by-ravindu644/samsung_kernel_a015f`, 4.9.227.
+- Samsung Galaxy A01, `Kernels-by-ravindu644/samsung_kernel_a015f`, 4.9.227. Booted with
+  Fedora 44 and Arch Linux ARM.
 - Google `android-4.9-p-release`, 4.9.118, and `android-4.9-p`, 4.9.299, both after the
   pidfd backport.
 

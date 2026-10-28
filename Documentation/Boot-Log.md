@@ -1,7 +1,7 @@
 # Reading the boot log
 
-Every line below was seen on the way to a clean 4.14 boot, except the two that say so.
-Find the line, apply the fix, boot again. Patch numbers are those of the 4.14 series. The 4.19 series has no patch 2, so from
+Every line below was seen on the way to a clean boot on 4.14 or 4.9, except the two that
+say so. Find the line, apply the fix, boot again. Patch numbers are those of the 4.14 series. The 4.19 series has no patch 2, so from
 patch 3 on subtract one. The 4.9 series folds patches 4 and 5 into its patch 4, so from
 patch 6 on subtract one.
 
@@ -11,8 +11,8 @@ whole pidfd series and needs [`pidfd-backport-4.9/`](../pidfd-backport-4.9/READM
 [`pidfd-backport-4.14/`](../pidfd-backport-4.14/README.md) first.
 
 **PID 1 fails before any unit starts, `strace` shows `statx` returning ENOSYS.** A 4.9
-kernel without statx. Patch 4 of the 4.9 series. Not seen in a log yet, the 4.9 series has
-not been booted; this is what the source says will happen.
+kernel without statx. Patch 4 of the 4.9 series. Not seen in a log, the 4.9 boots had the
+patch in; this is what the source says happens without it.
 
 **`Detected cgroup v1 hierarchy ... refusing execution`.** The guest sees a cgroup v1 mount
 under `/sys/fs/cgroup`. The runtime has to mount cgroup2 there; Droidspaces does.
@@ -44,7 +44,15 @@ statx patch carries both.
 
 **`run0`, `systemd-run -t` or `machinectl shell` cannot open a terminal.** The kernel lacks
 `TIOCGPTPEER`. 4.14 and 4.19 have it; on 4.9 it is patch 14 of the series. Also not seen
-in a log yet, for the same reason.
+in a log, for the same reason.
+
+**`A stop job is running for Session c1 of User root` or `for User Manager for UID 0` on
+every stop or shutdown with a login open, then SIGKILL when the timeout runs out.** Services
+stop fine, and `systemd-run --scope sleep 1` leaves a `running` scope behind after the
+sleep has exited. The kernel's `cgroup.events` has no `frozen` line and systemd 258 and
+newer then drop the whole notification. Patch 15 of the 4.9 series. On a 4.14 tree where
+the probe says `cgroup_events_frozen no`, the same seven lines by hand, see the
+[4.14 series README](../kernel-4.14-series/README.md).
 
 **`Failed to close all file descriptors: Function not implemented`.** systemd 260 or newer
 on a kernel without `close_range`. Patches 8 and 9.

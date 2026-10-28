@@ -75,6 +75,13 @@ All ten, in order, with `git am`, no hand edits:
   pidfd, 398 compat syscalls, none of the later credential changes and its own KernelSU hook
   shape. It is the tree the hunks were shaped for.
 
+If the probe says `cgroup_events_frozen no`, your tree lacks Google's cgroup freezer
+backport and stops of login sessions will hang, see the
+[internals page](../Documentation/Internals.md#why-stops-hang-without-the-frozen-key).
+The booted exynos9820 tree has the backport. There is no 4.14 patch for it here; the
+seven lines of patch 15 of the [4.9 series](../kernel-4.9-series/README.md) go into
+`cgroup_events_show()` in `kernel/cgroup/cgroup.c` on such a tree.
+
 ## Deviations from mainline
 
 - Patch 1 keeps the Android `pidfd_to_pid()` helper in `kernel/signal.c`, which also accepts

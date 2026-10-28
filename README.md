@@ -5,23 +5,27 @@ container boot systemd 258 through 262 on an Android 4.9, 4.14 or 4.19 kernel.
 
 systemd 258 raised its kernel baseline to 5.4 and 260 raised it to 5.10. The fallbacks that
 let it run on anything older are gone from the code. The patches here put back the handful
-of kernel features it now assumes. They are small, and all but two are mainline
-cherry-picks.
+of kernel features it now assumes. They are small, and most are mainline cherry-picks.
 
 If you do not want to touch the kernel, pin systemd to 257. It still boots on 4.x.
 
 ## Result
 
-A Samsung Galaxy S10 on kernel 4.14.356 with the patches applied, on 2026-10-28:
+A Samsung Galaxy S10 on kernel 4.14.356, on 2026-10-28, and a Samsung Galaxy A01 on kernel
+4.9.227, on 2026-10-28 and 2026-10-29, with the patches applied:
 
 <table>
   <tr>
-    <td width="50%" align="center"><img src="Documentation/resources/fedora.png" width="100%"><br>Fedora 44, systemd 259</td>
-    <td width="50%" align="center"><img src="Documentation/resources/arch.png" width="100%"><br>Arch Linux ARM, systemd 262</td>
+    <td width="50%" align="center"><img src="Documentation/resources/fedora-4.14.png" width="100%"><br>Galaxy S10, 4.14.356: Fedora 44, systemd 259</td>
+    <td width="50%" align="center"><img src="Documentation/resources/arch-4.14.png" width="100%"><br>Galaxy S10, 4.14.356: Arch Linux ARM, systemd 262</td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><img src="Documentation/resources/fedora-4.9.png" width="100%"><br>Galaxy A01, 4.9.227: Fedora 44, systemd 259</td>
+    <td width="50%" align="center"><img src="Documentation/resources/arch-4.9.png" width="100%"><br>Galaxy A01, 4.9.227: Arch Linux ARM, systemd 262</td>
   </tr>
 </table>
 
-Both guests boot to their login prompt with zero failed units, get an address from
+All four guests boot to their login prompt with zero failed units, get an address from
 networkd, resolve DNS through resolved, and report nothing worse than `Tainted: old-kernel`.
 
 ## What you need

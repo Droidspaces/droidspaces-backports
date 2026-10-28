@@ -17,7 +17,7 @@ else
     read_file() { cat "$d/$1" 2>/dev/null; }
 fi
 has() { read_file "$1" | grep -qE -- "$2" && echo yes || echo no; }
-ver=$(read_file Makefile | sed -n 2,4p | awk '{print $3}' | paste -sd.)
+ver=$(read_file Makefile | grep -m3 -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' | awk '{print $3}' | paste -sd.)
 echo "kernel ${ver:-unknown}"
 printf "%-28s %s\n" statx                 "$(has fs/stat.c 'SYSCALL_DEFINE5\(statx')"
 printf "%-28s %s\n" TIOCGPTPEER           "$(has include/uapi/asm-generic/ioctls.h TIOCGPTPEER)"
@@ -27,6 +27,7 @@ printf "%-28s %s\n" cgroup2_nsdelegate    "$(has kernel/cgroup/cgroup.c nsdelega
 printf "%-28s %s\n" cgroup2_cpu_controller "$(has kernel/sched/core.c 'cpu_weight_read_u64|cpu\.weight')"
 printf "%-28s %s\n" cgroup2_threads       "$(has kernel/cgroup/cgroup.c 'cgroup\.threads')"
 printf "%-28s %s\n" cgroup2_freeze        "$(has kernel/cgroup/cgroup.c 'cgroup\.freeze')"
+printf "%-28s %s\n" cgroup_events_frozen  "$( { read_file kernel/cgroup/cgroup.c; read_file kernel/cgroup.c; } | grep -qE 'frozen (%d|0)' && echo yes || echo no)"
 printf "%-28s %s\n" PSI                   "$(has kernel/sched/psi.c psi_)"
 printf "%-28s %s\n" pidfd_send_signal     "$(has kernel/signal.c 'pidfd_send_signal')"
 printf "%-28s %s\n" CLONE_PIDFD           "$(has include/uapi/linux/sched.h CLONE_PIDFD)"

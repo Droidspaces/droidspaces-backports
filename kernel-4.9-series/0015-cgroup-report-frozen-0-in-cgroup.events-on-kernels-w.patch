@@ -1,0 +1,52 @@
+From 945ccf7b7fcd6364f02f9189b4ca1fe1c992ede5 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 18:29:24 +0000
+Subject: [PATCH] cgroup: report "frozen 0" in cgroup.events on kernels without
+ the v2 freezer
+
+Since v256, systemd reacts to a cgroup.events inotify event by reading the
+file and asking for both the "populated" and the "frozen" key
+(unit_check_cgroup_events() in src/core/cgroup.c). cg_get_keyed_attribute()
+returns ENXIO when any requested key is missing, and the caller then
+returns without queueing the cgroup-empty event. The "frozen" key arrived
+with the cgroup v2 freezer in 5.2.
+
+On a kernel without the freezer the effect is that systemd never learns
+that a cgroup became empty unless it also gets a SIGCHLD for the unit's
+main process. Plain services stop normally, but every scope unit (login
+sessions, systemd-run --scope) and user@.service, whose cgroups hold no
+child of PID 1, hang in "stop" until TimeoutStopSec expires, and a
+container shutdown that has a login session open takes the full timeout
+and then a SIGKILL.
+
+Print "frozen 0" after "populated" exactly as 5.2 does. Nothing can be
+frozen through cgroup2 on this kernel, so the value is always right, and
+cgroup.freeze stays absent, so systemd still reports the freezer as
+unsupported for "systemctl freeze".
+
+Observed on a Samsung Galaxy A01 (4.9.227) running Fedora 44 (systemd 259)
+and Arch (systemd 262) as Droidspaces guests. A 4.14 tree that carries
+Google's Android R freezer backport does not need this; one that does not
+(Google's own android-4.14-stable included) does.
+---
+ kernel/cgroup.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/kernel/cgroup.c b/kernel/cgroup.c
+index 805afbe1b8a..254a70edc90 100644
+--- a/kernel/cgroup.c
++++ b/kernel/cgroup.c
+@@ -3535,6 +3535,13 @@ static int cgroup_events_show(struct seq_file *seq, void *v)
+ {
+ 	seq_printf(seq, "populated %d\n",
+ 		   cgroup_is_populated(seq_css(seq)->cgroup));
++	/*
++	 * This kernel has no cgroup v2 freezer, so nothing is ever frozen.
++	 * Say so the way 5.2 does: systemd 256 and newer parse this file for
++	 * both keys and drop the whole notification, including the populated
++	 * change it came for, when either is missing.
++	 */
++	seq_puts(seq, "frozen 0\n");
+ 	return 0;
+ }
+ 

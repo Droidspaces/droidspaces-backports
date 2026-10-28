@@ -109,8 +109,10 @@ error, callers treat it as "option not supported" and continue; fallback removed
 c2198d0c3 "assume fsopen() works in mount_option_supported()". From 259 it is fatal for
 every service with credentials. See [the mount API section](#the-new-mount-api).
 
-The rest only cost a feature. The cgroup freezer (5.2, fallback removed in 3c86a935a)
-breaks `systemctl freeze`. The cgroup v2 cpu controller and per-cgroup `cpu.stat` (4.15,
+The rest only cost a feature, with one exception. The cgroup freezer (5.2, fallback
+removed in 3c86a935a) breaks `systemctl freeze`, and since 258 its `frozen` line in
+`cgroup.events` is also what every stop waits for, see
+[the frozen key section](#why-stops-hang-without-the-frozen-key). The cgroup v2 cpu controller and per-cgroup `cpu.stat` (4.15,
 29da53dde) mean CPU accounting reads zero and `CPUWeight=` does nothing; the same goes for
 memory, pids and io whenever the host holds them on v1. The cgroup-bpf device hook (4.15)
 and socket address hooks (4.17) turn `DeviceAllow=`, `SocketBindAllow=` and
@@ -243,6 +245,32 @@ that returns an empty dump, and the three rows in `security/selinux/nlmsgtab.c` 
 the table's `BUILD_BUG_ON(RTM_MAX != ...)` true. The real nexthop code is 2000 lines and
 systemd only needs it for `[NextHop]` sections.
 
+## Why stops hang without the frozen key
+
+When a cgroup becomes empty the kernel modifies its `cgroup.events` file and systemd gets
+an inotify event. `unit_check_cgroup_events()` in `src/core/cgroup.c` then reads the file
+asking for two keys at once, `populated` and `frozen`. Up to 257 it used a tolerant reader
+that left a missing key NULL and went on. Commit 88f4bf8a8 "core/cgroup: also assume
+cgroup.events frozen attr is available", in 258, switched it to `cg_get_keyed_attribute()`,
+which returns ENXIO when any requested key is missing, and the caller returns without
+queueing the cgroup-empty event. The `frozen` line arrived with the cgroup v2 freezer in
+kernel 5.2, so on an older kernel systemd never learns that a cgroup emptied.
+
+A plain service still stops, because PID 1 also gets SIGCHLD for its main process. A unit
+whose processes are not children of PID 1 does not: every scope, which is every login
+session and every `systemd-run --scope`, and `user@.service`. Their stop job sits at "A
+stop job is running" until `TimeoutStopSec` and ends in SIGKILL, and a container shutdown
+with a login open takes the full timeout.
+
+Patch 15 of the 4.9 series prints `frozen 0` after `populated`, exactly the line 5.2
+prints. Nothing can be frozen through cgroup2 on that kernel, so the value is always right,
+and `cgroup.freeze` stays absent, so systemd still reports the freezer as unsupported. No
+4.9 kernel has the freezer. Some 4.14 trees carry Google's Android R backport of it and
+already print the line, others do not, and the probe's `cgroup_events_frozen` row tells
+them apart; a tree without it needs the same seven lines in `kernel/cgroup/cgroup.c`, and
+a tree with it must not get them, or the key is printed twice. The systemd-side fix would be one line, treating a missing `frozen`
+as 0, and is worth filing upstream, but the kernel line is what helps the phones today.
+
 ## Things that are not the problem
 
 - `clone3` is never called by systemd directly. glibc's posix_spawn uses it when
@@ -277,7 +305,7 @@ matched the corresponding Google branch line for line in every probe.
 | waitid P_PIDFD | 5.4 | no | no | no | yes | yes |
 | SO_BINDTOIFINDEX | 5.1 | no | no | no | yes | yes |
 | New mount API (fsopen and friends) | 5.2 | no | no | no | yes | yes |
-| cgroup2 freezer | 5.2 | no | no | yes | yes | yes |
+| cgroup2 freezer, `frozen` in cgroup.events | 5.2 | no | no | yes | yes | yes |
 | Nexthop netlink types and group | 5.3 | no | no | no | yes | yes |
 | memory_recursiveprot | 5.7 | no | no | no | no | yes |
 | STATX_MNT_ID, STATX_ATTR_MOUNT_ROOT | 5.8 | no | no | no | no | yes |
@@ -309,7 +337,8 @@ Key files to read when verifying a claim: `src/basic/pidref.c`, `src/basic/proce
 (`sd_event_add_child`), `src/core/main.c` (`cg_has_legacy`), `src/shared/mount-setup.c`
 (the fatal mount table), `src/basic/fd-util.c` (`close_all_fds`),
 `src/basic/mountpoint-util.c` and `src/basic/stat-util.c` (mount id handling),
-`src/core/exec-credential.c` and `src/core/namespace.c` (mount API callers).
+`src/core/exec-credential.c` and `src/core/namespace.c` (mount API callers), and
+`src/core/cgroup.c` (`unit_check_cgroup_events`).
 
 systemd's baseline will move again. 260 raised it to 5.10 and the README already lists 5.12
 to 5.14 features as recommended. Each bump can remove another fallback this repository

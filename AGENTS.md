@@ -14,7 +14,7 @@ test suite and no code of its own apart from one shell script. The content is:
 - `pidfd-backport-4.9/`, `pidfd-backport-4.14/`: Google's pidfd backport for trees that
   never got it, plus a README. The 4.9 one carries two alternate patches for 4.9.1xx trees
   under `alt-4.9.1xx/`.
-- `Documentation/`: `Porting.md`, `Boot-Log.md`, `Internals.md`, and the two screenshots
+- `Documentation/`: `Porting.md`, `Boot-Log.md`, `Internals.md`, and the four screenshots
   under `resources/`.
 - `tools/probe-kernel.sh`: prints `yes` or `no` for every feature the patches add.
 - `README.md`: the entry point. One screen. It links to everything else.
@@ -67,9 +67,9 @@ and compiled. Treat it as a build artifact, not a source file.
   that line, a short paragraph starting `Backport to 4.14:` or `Backport to 4.19:` says
   what was changed and why, and a `Conflicts:` line names the files that needed hand
   placement. Nothing else goes into the body.
-- The original patches, the nexthop stub in every series and the reduced statx on 4.9,
-  keep their own author and explain the problem they solve in their body. Do not rewrite
-  them into cherry-picks.
+- The original patches, the nexthop stub in every series, the reduced statx on 4.9 and the
+  `frozen 0` line on 4.9, keep their own author and explain the problem they solve in
+  their body. Do not rewrite them into cherry-picks.
 - A patch adds one feature. Do not merge two patches because they touch the same file,
   and do not split one because it is large. The README's "skip if the probe says yes"
   logic depends on one feature per patch.
@@ -194,5 +194,6 @@ findings, as in the boot log page, and nothing else.
   hash from systemd's tree next to it, or it does not go in.
 - The new mount API is handled by Droidspaces, not by a kernel patch. The reasoning is in
   `Internals.md`. Do not add a mount API backport to any series.
-- The boot in the screenshots was on 2026-10-28 on a Galaxy S10, kernel 4.14.356, Fedora 44
-  with systemd 259 and Arch Linux ARM with systemd 262. Do not change these captions.
+- The boots in the screenshots were on a Galaxy S10, kernel 4.14.356, on 2026-10-28, and
+  on a Galaxy A01, kernel 4.9.227, on 2026-10-28 and 2026-10-29, each with Fedora 44 on
+  systemd 259 and Arch Linux ARM on systemd 262. Do not change these captions.

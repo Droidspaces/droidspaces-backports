@@ -1,9 +1,10 @@
 # The 4.9 series
 
-Fourteen patches against Google's `android-4.9-q` (4.9.337). Patches 1 to 9 are everything
-a 4.9 Android kernel with the Android R pidfd backport is missing to run systemd 258
+Fifteen patches against Google's `android-4.9-q` (4.9.337). Patches 1 to 9 are everything
+a 4.9 Android kernel with the Android R pidfd backport is missing to boot systemd 258
 through 262 as a Droidspaces guest. Patch 10 is the x86 and 32-bit ARM table wiring.
-Patches 11 to 14 are 4.11 to 4.13 features systemd wants but does not need to boot.
+Patches 11 to 14 are 4.11 to 4.13 features systemd wants but does not need to boot. Patch
+15 is seven lines without which every stop of a login session hangs until its timeout.
 
 4.9 differs from 4.14 and 4.19 in one big way: it has no `statx()` at all, and systemd 258
 removed its statx fallback. Patch 4 is that syscall, written for this series rather than
@@ -59,16 +60,22 @@ already have it, and what goes wrong without it. The full story behind each one 
 14. `0014-tty-add-TIOCGPTPEER-ioctl.patch`, mainline 54ebbfb160, c632517923 and 311fc65c9f
     (v4.13) squashed. Skip if `TIOCGPTPEER yes`. Without it `run0`, `systemd-run -t`,
     `machinectl shell` and nspawn consoles fail to open their pty. Soft, not needed to boot.
+15. `0015-cgroup-report-frozen-0-in-cgroup.events-on-kernels-w.patch`, original, seven
+    lines. Skip if `cgroup_events_frozen yes`, which no 4.9 kernel says. Without it every
+    scope unit and `user@.service` hang in stop until their timeout, and a container
+    shutdown with a login open ends in SIGKILL. Prints `frozen 0` in `cgroup.events` the way
+    kernel 5.2 does. Required for clean stops. The [internals
+    page](../Documentation/Internals.md#why-stops-hang-without-the-frozen-key) has the why.
 
 Patches 5 to 8 only matter for systemd 260 and newer. Ordering: 8 needs 7, 6 goes before 8
 because it raises the table sizes to 440, 13 after 12, and 11 after 3 because both add a
-line at the same spot in `asm-generic/socket.h`.
+line at the same spot in `asm-generic/socket.h`. 15 is independent of the rest.
 
 ## Apply
 
 ```
 git am 0001-*.patch 0002-*.patch 0003-*.patch 0004-*.patch 0005-*.patch
-git am 0006-*.patch 0007-*.patch 0008-*.patch 0009-*.patch
+git am 0006-*.patch 0007-*.patch 0008-*.patch 0009-*.patch 0015-*.patch
 git am 0011-*.patch 0012-*.patch 0013-*.patch 0014-*.patch    # soft, recommended
 git am 0010-*.patch        # x86 and 32-bit ARM builds only
 ```
@@ -79,7 +86,7 @@ is the first thing to fail if a syscall number is wrong:
 ```
 make O=out ARCH=arm64 CC=clang ... fs/stat.o fs/open.o fs/file.o fs/utimes.o fs/nsfs.o \
   fs/devpts/inode.o drivers/tty/pty.o drivers/tty/tty_io.o net/core/sock.o \
-  net/core/rtnetlink.o kernel/exit.o kernel/fork.o kernel/signal.o \
+  net/core/rtnetlink.o kernel/exit.o kernel/fork.o kernel/signal.o kernel/cgroup.o \
   security/selinux/nlmsgtab.o arch/arm64/kernel/sys.o arch/arm64/kernel/sys32.o
 ```
 
@@ -107,31 +114,34 @@ If your tree already has a real statx and the probe says `statx yes`, skip patch
 patches 4 and 5 of the [4.14 series](../kernel-4.14-series/README.md), the mount id and
 mount root additions, instead.
 
-This is new code, not a cherry-pick, and no systemd has booted on it yet. If something in a
-4.9 guest misbehaves around file metadata, `strace -e statx` is the first thing to look at.
+This is new code, not a cherry-pick. Fedora 44 and Arch Linux ARM have booted on it on the
+Galaxy A01 and nothing around file metadata has misbehaved so far. If something does,
+`strace -e statx` is the first thing to look at.
 
 ## Where it was applied
 
-- `aosp-mirror/kernel_common`, branch `deprecated/android-4.9-q`, 4.9.337. All fourteen.
+- `aosp-mirror/kernel_common`, branch `deprecated/android-4.9-q`, 4.9.337. All fifteen.
   Before the series the probe showed pidfd, PSI and `GRND_INSECURE` present and everything
   else absent; after it only the cgroup2 items are still missing, and those are soft. The
   sixteen objects above compiled with Ubuntu clang 18.1.3 and `cuttlefish_defconfig`, no
   errors, no warnings. The patch files reproduce the compiled tree byte for byte.
 - `Kernels-by-ravindu644/samsung_kernel_a015f` (Galaxy A01, SDM439), 4.9.227. Patches 1 to
-  9 and 11 to 14 unchanged. Patch 10 rejects: the tree has no `arch/arm/kernel/calls.S` and
-  its 32-bit ARM headers are Samsung's own. The sixteen objects compiled with the tree's own
-  defconfig, stack protector off because Ubuntu's clang fails the tree's compiler check. This
-  tree has KernelSU hooks in `fs/open.c` and `fs/stat.c` and KNOX socket options after
+  9 and 11 to 15 unchanged. Patch 10 rejects: the tree has no `arch/arm/kernel/calls.S` and
+  its 32-bit ARM headers are Samsung's own, and the tree only builds arm64, so it is not
+  needed. Compiled and booted with Fedora 44 (systemd 259) and Arch Linux ARM (systemd
+  262), the screenshots in the main README: zero failed units, a DHCP lease from networkd,
+  resolved answering, console login working. The only kernel-related log lines are the
+  expected ones, the BPF device controller and bpf-firewall failing to attach with E2BIG and
+  the baseline warning. The first boot showed the stop hang that patch 15 fixes; with it,
+  stopping the container with a root login open stops the session scope and
+  `user@0.service` at once and Arch runs its shutdown sequence through to "Powering off".
+  This tree has KernelSU hooks in `fs/open.c` and `fs/stat.c` and KNOX socket options after
   `SO_COOKIE`, which is what the hunks were shaped around.
 - `aosp-mirror/kernel_common`, branch `deprecated/android-4.9-p-release`, 4.9.118, Android
-  9, no pidfd. All fourteen unchanged after the pidfd backport. Sixteen objects plus
+  9, no pidfd. All fifteen unchanged after the pidfd backport. The objects above plus
   `kernel/pid.o` and `fs/proc/base.o` compiled with `defconfig`.
 - `aosp-mirror/kernel_common`, branch `deprecated/android-4.9-p`, 4.9.299, no pidfd. All
-  fourteen unchanged after the pidfd backport. Applied only.
-
-Not boot-tested on a device. The 4.14 series with the same nine functional changes was.
-statx is the one piece 4.9 needs that 4.14 did not, and the Galaxy A01 will be the first
-device to run it.
+  fifteen unchanged after the pidfd backport. Applied only.
 
 ## Deviations from mainline
 
@@ -171,5 +181,7 @@ device to run it.
 Left out on purpose: `MS_NOSYMFOLLOW`, `memory_recursiveprot`, `GRND_INSECURE` (systemd
 retries without the flag; Google's 4.9.337 has it, Samsung's 4.9.227 does not), `STATX_BTIME`,
 and the cgroup2 cpu controller, `cgroup.threads`, freezer and `nsdelegate`, which are all
-soft on a Droidspaces guest. The new mount API is handled by Droidspaces, see the
+soft on a Droidspaces guest. Patch 15 reports the one line of the freezer's interface that
+systemd cannot do without and leaves `cgroup.freeze` absent, so `systemctl freeze` still
+says the freezer is unsupported instead of pretending. The new mount API is handled by Droidspaces, see the
 [internals page](../Documentation/Internals.md#the-new-mount-api).
