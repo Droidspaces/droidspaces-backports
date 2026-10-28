@@ -1,0 +1,48 @@
+From fec628441a17ebaeb95fa24e6e3aa540b4ed44e8 Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@redhat.com>
+Date: Thu, 14 May 2020 16:44:24 +0200
+Subject: [PATCH 05/10] utimensat: AT_EMPTY_PATH support
+
+This makes it possible to use utimensat on an O_PATH file (including
+symlinks).
+
+It supersedes the nonstandard utimensat(fd, NULL, ...) form.
+
+Cc: linux-api@vger.kernel.org
+Cc: linux-man@vger.kernel.org
+Signed-off-by: Miklos Szeredi <mszeredi@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+(cherry picked from commit 44a3b87444058b2cb055092cdebc63858707bf66)
+---
+ fs/utimes.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/utimes.c b/fs/utimes.c
+index 69d4b6ba1bfb..7e654f17c49f 100644
+--- a/fs/utimes.c
++++ b/fs/utimes.c
+@@ -126,13 +126,13 @@ long do_utimes(int dfd, const char __user *filename, struct timespec64 *times,
+ 		goto out;
+ 	}
+ 
+-	if (flags & ~AT_SYMLINK_NOFOLLOW)
++	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH))
+ 		goto out;
+ 
+ 	if (filename == NULL && dfd != AT_FDCWD) {
+ 		struct fd f;
+ 
+-		if (flags & AT_SYMLINK_NOFOLLOW)
++		if (flags)
+ 			goto out;
+ 
+ 		f = fdget(dfd);
+@@ -148,6 +148,8 @@ long do_utimes(int dfd, const char __user *filename, struct timespec64 *times,
+ 
+ 		if (!(flags & AT_SYMLINK_NOFOLLOW))
+ 			lookup_flags |= LOOKUP_FOLLOW;
++		if (flags & AT_EMPTY_PATH)
++			lookup_flags |= LOOKUP_EMPTY;
+ retry:
+ 		error = user_path_at(dfd, filename, lookup_flags, &path);
+ 		if (error)

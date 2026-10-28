@@ -1,0 +1,103 @@
+From 105db823457a20b285681581fcb5acd55370dc8e Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Tue, 27 Oct 2026 19:48:43 +0000
+Subject: [PATCH 09/10] arch: wire-up close_range()
+
+This wires up the close_range() syscall into all arches at once.
+
+Suggested-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Christian Brauner <christian.brauner@ubuntu.com>
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Acked-by: Arnd Bergmann <arnd@arndb.de>
+Acked-by: Michael Ellerman <mpe@ellerman.id.au> (powerpc)
+Cc: Jann Horn <jannh@google.com>
+Cc: David Howells <dhowells@redhat.com>
+Cc: Dmitry V. Levin <ldv@altlinux.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Florian Weimer <fweimer@redhat.com>
+Cc: linux-api@vger.kernel.org
+Cc: linux-alpha@vger.kernel.org
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-ia64@vger.kernel.org
+Cc: linux-m68k@lists.linux-m68k.org
+Cc: linux-mips@vger.kernel.org
+Cc: linux-parisc@vger.kernel.org
+Cc: linuxppc-dev@lists.ozlabs.org
+Cc: linux-s390@vger.kernel.org
+Cc: linux-sh@vger.kernel.org
+Cc: sparclinux@vger.kernel.org
+Cc: linux-xtensa@linux-xtensa.org
+Cc: linux-arch@vger.kernel.org
+Cc: x86@kernel.org
+(cherry picked from commit 9b4feb630e8e9801603f3cab3a1804433ea5c21b)
+
+Backport to 4.14: only the x86, arm and arm64 compat tables are wired, matching
+what this tree carries for pidfd_open(). __NR_syscalls and __NR_compat_syscalls
+were already raised to 440 by the faccessat2 patch.
+---
+ arch/arm/tools/syscall.tbl             | 1 +
+ arch/arm64/include/asm/unistd32.h      | 2 ++
+ arch/x86/entry/syscalls/syscall_32.tbl | 1 +
+ arch/x86/entry/syscalls/syscall_64.tbl | 1 +
+ include/uapi/asm-generic/unistd.h      | 2 ++
+ 5 files changed, 7 insertions(+)
+
+diff --git a/arch/arm/tools/syscall.tbl b/arch/arm/tools/syscall.tbl
+index 2ad17669f..6e3ae82f5 100644
+--- a/arch/arm/tools/syscall.tbl
++++ b/arch/arm/tools/syscall.tbl
+@@ -414,4 +414,5 @@
+ 397	common	statx			sys_statx
+ 424	common	pidfd_send_signal	sys_pidfd_send_signal
+ 434	common	pidfd_open		sys_pidfd_open
++436	common	close_range			sys_close_range
+ 439	common	faccessat2			sys_faccessat2
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index 70080af92..7ac652d49 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -821,6 +821,8 @@ __SYSCALL(__NR_statx, sys_statx)
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
++#define __NR_close_range 436
++__SYSCALL(__NR_close_range, sys_close_range)
+ #define __NR_faccessat2 439
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ 
+diff --git a/arch/x86/entry/syscalls/syscall_32.tbl b/arch/x86/entry/syscalls/syscall_32.tbl
+index 283e81f53..6879bde91 100644
+--- a/arch/x86/entry/syscalls/syscall_32.tbl
++++ b/arch/x86/entry/syscalls/syscall_32.tbl
+@@ -393,4 +393,5 @@
+ 384	i386	arch_prctl		sys_arch_prctl			compat_sys_arch_prctl
+ 424	i386	pidfd_send_signal	sys_pidfd_send_signal
+ 434	i386	pidfd_open		sys_pidfd_open
++436	i386	close_range		sys_close_range
+ 439	i386	faccessat2		sys_faccessat2
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index 8eac8bbc6..69fdd62c3 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -341,6 +341,7 @@
+ 332	common	statx			sys_statx
+ 424	common	pidfd_send_signal	sys_pidfd_send_signal
+ 434	common	pidfd_open		sys_pidfd_open
++436	common	close_range		sys_close_range
+ 439	common	faccessat2		sys_faccessat2
+ 
+ #
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index b26f9a62b..89e7838a8 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -736,6 +736,8 @@ __SYSCALL(__NR_statx,     sys_statx)
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
++#define __NR_close_range 436
++__SYSCALL(__NR_close_range, sys_close_range)
+ #define __NR_faccessat2 439
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ 

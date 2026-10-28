@@ -1,0 +1,112 @@
+From 06c1389461e7c294e09f3b31e2bc3a3ae43dca6a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 13:53:55 +0000
+Subject: [PATCH 09/10] rtnetlink: accept nexthop message types and multicast
+ group without nexthop support
+
+systemd-networkd 258 and newer assumes kernel 5.3 nexthop objects: it joins
+the RTNLGRP_NEXTHOP multicast group when it connects to rtnetlink and
+dumps RTM_GETNEXTHOP when it enumerates, and both errors are fatal. On this
+kernel the group number is beyond RTNLGRP_MAX, so NETLINK_ADD_MEMBERSHIP
+fails with EINVAL and networkd exits with "Could not set up manager" before
+it has done anything, which leaves the container without DHCP.
+
+Add the three nexthop message types and the multicast group from 5.3 to the
+uapi header, and register an RTM_GETNEXTHOP dump handler that returns an
+empty dump. Nothing ever sends to the group, so joining it is harmless.
+RTM_NEWNEXTHOP and RTM_DELNEXTHOP have no handler and keep returning
+EOPNOTSUPP, so anything that actually configures a nexthop is told the truth.
+
+The SELinux netlink permission table asserts at build time that it covers
+every type up to RTM_MAX, so it gets the three rows 5.3 gave it, with the
+same read/write classes.
+
+This is not an upstream backport; the real nexthop implementation
+(net/ipv4/nexthop.c, 5.3) is about 2000 lines and systemd does not need it
+unless a [NextHop] section is configured.
+---
+ include/uapi/linux/rtnetlink.h |  9 +++++++++
+ net/core/rtnetlink.c           | 12 ++++++++++++
+ security/selinux/nlmsgtab.c    |  5 ++++-
+ 3 files changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/include/uapi/linux/rtnetlink.h b/include/uapi/linux/rtnetlink.h
+index 46399367627f..a500d85d5d52 100644
+--- a/include/uapi/linux/rtnetlink.h
++++ b/include/uapi/linux/rtnetlink.h
+@@ -157,6 +157,13 @@ enum {
+ 	RTM_GETCHAIN,
+ #define RTM_GETCHAIN RTM_GETCHAIN
+ 
++	RTM_NEWNEXTHOP = 104,
++#define RTM_NEWNEXTHOP	RTM_NEWNEXTHOP
++	RTM_DELNEXTHOP,
++#define RTM_DELNEXTHOP	RTM_DELNEXTHOP
++	RTM_GETNEXTHOP,
++#define RTM_GETNEXTHOP	RTM_GETNEXTHOP
++
+ 	__RTM_MAX,
+ #define RTM_MAX		(((__RTM_MAX + 3) & ~3) - 1)
+ };
+@@ -704,6 +711,8 @@ enum rtnetlink_groups {
+ #define RTNLGRP_IPV4_MROUTE_R	RTNLGRP_IPV4_MROUTE_R
+ 	RTNLGRP_IPV6_MROUTE_R,
+ #define RTNLGRP_IPV6_MROUTE_R	RTNLGRP_IPV6_MROUTE_R
++	RTNLGRP_NEXTHOP,
++#define RTNLGRP_NEXTHOP		RTNLGRP_NEXTHOP
+ 	__RTNLGRP_MAX
+ };
+ #define RTNLGRP_MAX	(__RTNLGRP_MAX - 1)
+diff --git a/net/core/rtnetlink.c b/net/core/rtnetlink.c
+index 9209623ab644..43abc278a14c 100644
+--- a/net/core/rtnetlink.c
++++ b/net/core/rtnetlink.c
+@@ -4884,6 +4884,16 @@ static struct pernet_operations rtnetlink_net_ops = {
+ 	.exit = rtnetlink_net_exit,
+ };
+ 
++/* There are no nexthop objects on this kernel, so a dump of them is empty.
++ * Answering the request instead of EOPNOTSUPP lets systemd-networkd 258 and
++ * newer start: it enumerates nexthops unconditionally and treats any error
++ * as fatal. Creating or deleting one still fails with EOPNOTSUPP. */
++static int rtnl_dump_nexthop_none(struct sk_buff *skb,
++				  struct netlink_callback *cb)
++{
++	return 0;
++}
++
+ void __init rtnetlink_init(void)
+ {
+ 	if (register_pernet_subsys(&rtnetlink_net_ops))
+@@ -4900,6 +4910,8 @@ void __init rtnetlink_init(void)
+ 	rtnl_register(PF_UNSPEC, RTM_GETADDR, NULL, rtnl_dump_all, 0);
+ 	rtnl_register(PF_UNSPEC, RTM_GETROUTE, NULL, rtnl_dump_all, 0);
+ 	rtnl_register(PF_UNSPEC, RTM_GETNETCONF, NULL, rtnl_dump_all, 0);
++	rtnl_register(PF_UNSPEC, RTM_GETNEXTHOP, NULL, rtnl_dump_nexthop_none,
++		      0);
+ 
+ 	rtnl_register(PF_BRIDGE, RTM_NEWNEIGH, rtnl_fdb_add, NULL, 0);
+ 	rtnl_register(PF_BRIDGE, RTM_DELNEIGH, rtnl_fdb_del, NULL, 0);
+diff --git a/security/selinux/nlmsgtab.c b/security/selinux/nlmsgtab.c
+index 74898884832f..fd49f0522a6b 100644
+--- a/security/selinux/nlmsgtab.c
++++ b/security/selinux/nlmsgtab.c
+@@ -83,6 +83,9 @@ static struct nlmsg_perm nlmsg_route_perms[] =
+ 	{ RTM_NEWCHAIN,		NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_DELCHAIN,		NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_GETCHAIN,		NETLINK_ROUTE_SOCKET__NLMSG_READ  },
++	{ RTM_NEWNEXTHOP,	NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
++	{ RTM_DELNEXTHOP,	NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
++	{ RTM_GETNEXTHOP,	NETLINK_ROUTE_SOCKET__NLMSG_READ  },
+ };
+ 
+ static const struct nlmsg_perm nlmsg_tcpdiag_perms[] =
+@@ -166,7 +169,7 @@ int selinux_nlmsg_lookup(u16 sclass, u16 nlmsg_type, u32 *perm)
+ 		 * structures at the top of this file with the new mappings
+ 		 * before updating the BUILD_BUG_ON() macro!
+ 		 */
+-		BUILD_BUG_ON(RTM_MAX != (RTM_NEWCHAIN + 3));
++		BUILD_BUG_ON(RTM_MAX != (RTM_NEWNEXTHOP + 3));
+ 		err = nlmsg_perm(nlmsg_type, perm, nlmsg_route_perms,
+ 				 sizeof(nlmsg_route_perms));
+ 		break;

@@ -1,0 +1,45 @@
+From 3b9dc53b362a62abbe68637b712d04aa2a6bde07 Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@redhat.com>
+Date: Thu, 14 May 2020 16:44:24 +0200
+Subject: [PATCH 04/10] statx: add mount_root
+
+Determining whether a path or file descriptor refers to a mountpoint (or
+more precisely a mount root) is not trivial using current tools.
+
+Add a flag to statx that indicates whether the path or fd refers to the
+root of a mount or not.
+
+Cc: linux-api@vger.kernel.org
+Cc: linux-man@vger.kernel.org
+Reported-by: Lennart Poettering <mzxreary@0pointer.de>
+Reported-by: J. Bruce Fields <bfields@fieldses.org>
+Signed-off-by: Miklos Szeredi <mszeredi@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+(cherry picked from commit 80340fe3605c0e78cfe496c3b3878be828cfdbfe)
+---
+ fs/stat.c                 | 3 +++
+ include/uapi/linux/stat.h | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/fs/stat.c b/fs/stat.c
+index 6e620b0cf2cd..a854143f9dd0 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -191,6 +191,9 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 	error = vfs_getattr(&path, stat, request_mask, flags);
+ 	stat->mnt_id = real_mount(path.mnt)->mnt_id;
+ 	stat->result_mask |= STATX_MNT_ID;
++	if (path.mnt->mnt_root == path.dentry)
++		stat->attributes |= STATX_ATTR_MOUNT_ROOT;
++	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
+ 	path_put(&path);
+ 	if (retry_estale(error, lookup_flags)) {
+ 		lookup_flags |= LOOKUP_REVAL;
+diff --git a/include/uapi/linux/stat.h b/include/uapi/linux/stat.h
+--- a/include/uapi/linux/stat.h
++++ b/include/uapi/linux/stat.h
+@@ -176,3 +176,4 @@
+ 
++#define STATX_ATTR_MOUNT_ROOT		0x00002000 /* Root of a mount */
+ 
+ #endif /* _UAPI_LINUX_STAT_H */

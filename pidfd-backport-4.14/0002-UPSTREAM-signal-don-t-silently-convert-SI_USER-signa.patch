@@ -1,0 +1,57 @@
+From 8c5278e955b18cc39b25bc69870c7b14a7b797f2 Mon Sep 17 00:00:00 2001
+From: Jann Horn <jannh@google.com>
+Date: Sat, 30 Mar 2019 03:12:32 +0100
+Subject: [PATCH 02/12] UPSTREAM: signal: don't silently convert SI_USER
+ signals to non-current pidfd
+
+The current sys_pidfd_send_signal() silently turns signals with explicit
+SI_USER context that are sent to non-current tasks into signals with
+kernel-generated siginfo.
+This is unlike do_rt_sigqueueinfo(), which returns -EPERM in this case.
+If a user actually wants to send a signal with kernel-provided siginfo,
+they can do that with pidfd_send_signal(pidfd, sig, NULL, 0); so allowing
+this case is unnecessary.
+
+Instead of silently replacing the siginfo, just bail out with an error;
+this is consistent with other interfaces and avoids special-casing behavior
+based on security checks.
+
+Fixes: 3eb39f47934f ("signal: add pidfd_send_signal() syscall")
+Signed-off-by: Jann Horn <jannh@google.com>
+Signed-off-by: Christian Brauner <christian@brauner.io>
+
+(cherry picked from commit 556a888a14afe27164191955618990fb3ccc9aad)
+
+Bug: 135608568
+Test: test program using syscall(__NR_pidfd_send_signal,..) to send SIGKILL
+Change-Id: I493af671b82c43bff1425ee24550d2fb9aa6d961
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ kernel/signal.c | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 2518ab1..708ab32 100755
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -3149,16 +3149,11 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
+ 		if (unlikely(sig != kinfo.si_signo))
+ 			goto err;
+ 
++		/* Only allow sending arbitrary signals to yourself. */
++		ret = -EPERM;
+ 		if ((task_pid(current) != pid) &&
+-		    (kinfo.si_code >= 0 || kinfo.si_code == SI_TKILL)) {
+-			/* Only allow sending arbitrary signals to yourself. */
+-			ret = -EPERM;
+-			if (kinfo.si_code != SI_USER)
+-				goto err;
+-
+-			/* Turn this into a regular kill signal. */
+-			prepare_kill_siginfo(sig, &kinfo);
+-		}
++		    (kinfo.si_code >= 0 || kinfo.si_code == SI_TKILL))
++			goto err;
+ 	} else {
+ 		prepare_kill_siginfo(sig, &kinfo);
+ 	}

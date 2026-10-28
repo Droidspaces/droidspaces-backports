@@ -1,0 +1,81 @@
+From 483af358de432add039efc06cd4e214963e187a4 Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@redhat.com>
+Date: Thu, 14 May 2020 16:44:24 +0200
+Subject: [PATCH 03/10] statx: add mount ID
+
+Systemd is hacking around to get it and it's trivial to add to statx, so...
+
+Cc: linux-api@vger.kernel.org
+Cc: linux-man@vger.kernel.org
+Signed-off-by: Miklos Szeredi <mszeredi@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+(cherry picked from commit fa2fcf4f1df1559a0a4ee0f46915b496cc2ebf60)
+---
+ fs/stat.c                 | 5 +++++
+ include/linux/stat.h      | 1 +
+ include/uapi/linux/stat.h | 7 ++++++-
+ 3 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/fs/stat.c b/fs/stat.c
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -20,3 +20,5 @@
+ #include <linux/uaccess.h>
+ #include <asm/unistd.h>
++
++#include "mount.h"
+ 
+@@ -187,6 +189,8 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 		goto out;
+ 
+ 	error = vfs_getattr(&path, stat, request_mask, flags);
++	stat->mnt_id = real_mount(path.mnt)->mnt_id;
++	stat->result_mask |= STATX_MNT_ID;
+ 	path_put(&path);
+ 	if (retry_estale(error, lookup_flags)) {
+ 		lookup_flags |= LOOKUP_REVAL;
+@@ -547,6 +551,7 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
+ 	tmp.stx_rdev_minor = MINOR(stat->rdev);
+ 	tmp.stx_dev_major = MAJOR(stat->dev);
+ 	tmp.stx_dev_minor = MINOR(stat->dev);
++	tmp.stx_mnt_id = stat->mnt_id;
+ 
+ 	return copy_to_user(buffer, &tmp, sizeof(tmp)) ? -EFAULT : 0;
+ }
+diff --git a/include/linux/stat.h b/include/linux/stat.h
+index 528c4baad091..56614af83d4a 100644
+--- a/include/linux/stat.h
++++ b/include/linux/stat.h
+@@ -47,6 +47,7 @@ struct kstat {
+ 	struct timespec64 ctime;
+ 	struct timespec64 btime;			/* File creation time */
+ 	u64		blocks;
++	u64		mnt_id;
+ };
+ 
+ #endif
+diff --git a/include/uapi/linux/stat.h b/include/uapi/linux/stat.h
+index ad80a5c885d5..c4ce8d0d1c75 100644
+--- a/include/uapi/linux/stat.h
++++ b/include/uapi/linux/stat.h
+@@ -123,7 +123,10 @@ struct statx {
+ 	__u32	stx_dev_major;	/* ID of device containing file [uncond] */
+ 	__u32	stx_dev_minor;
+ 	/* 0x90 */
+-	__u64	__spare2[14];	/* Spare space for future expansion */
++	__u64	stx_mnt_id;
++	__u64	__spare2;
++	/* 0xa0 */
++	__u64	__spare3[12];	/* Spare space for future expansion */
+ 	/* 0x100 */
+ };
+ 
+@@ -149,6 +152,8 @@ struct statx {
+ #define STATX_BASIC_STATS	0x000007ffU	/* The stuff in the normal stat struct */
+ #define STATX_BTIME		0x00000800U	/* Want/got stx_btime */
+ #define STATX_ALL		0x00000fffU	/* All currently supported flags */
++#define STATX_MNT_ID		0x00001000U	/* Got stx_mnt_id */
++
+ #define STATX__RESERVED		0x80000000U	/* Reserved for future struct statx expansion */
+ 
+ /*

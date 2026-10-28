@@ -1,0 +1,73 @@
+From e4f863f503188b2fe8cf1f3c575fb7cb64d2b98a Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Thu, 28 Feb 2019 13:59:19 +0100
+Subject: [PATCH 12/12] BACKPORT: arch: add pidfd and io_uring syscalls
+ everywhere
+
+Add the io_uring and pidfd_send_signal system calls to all architectures.
+
+These system calls are designed to handle both native and compat tasks,
+so all entries are the same across architectures, only arm-compat and
+the generic tale still use an old format.
+
+Acked-by: Michael Ellerman <mpe@ellerman.id.au> (powerpc)
+Acked-by: Heiko Carstens <heiko.carstens@de.ibm.com> (s390)
+Acked-by: Geert Uytterhoeven <geert@linux-m68k.org>
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+
+(cherry picked from commit 39036cd2727395c3369b1051005da74059a85317)
+
+Conflicts:
+
+        arch/alpha/kernel/syscalls/syscall.tbl
+        arch/arm/tools/syscall.tbl
+        arch/arm64/include/asm/unistd.h
+        arch/arm64/include/asm/unistd32.h
+        arch/ia64/kernel/syscalls/syscall.tbl
+        arch/m68k/kernel/syscalls/syscall.tbl
+        arch/microblaze/kernel/syscalls/syscall.tbl
+        arch/mips/kernel/syscalls/syscall_n32.tbl
+        arch/mips/kernel/syscalls/syscall_n64.tbl
+        arch/mips/kernel/syscalls/syscall_o32.tbl
+        arch/parisc/kernel/syscalls/syscall.tbl
+        arch/powerpc/kernel/syscalls/syscall.tbl
+        arch/s390/kernel/syscalls/syscall.tbl
+        arch/sh/kernel/syscalls/syscall.tbl
+        arch/sparc/kernel/syscalls/syscall.tbl
+        arch/xtensa/kernel/syscalls/syscall.tbl
+
+(1. Skipped syscall.tbl modifications for missing architectures.
+ 2. Skipped io_uring syscall additions)
+
+Bug: 135608568
+Test: make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-
+Change-Id: I163257e10f1d1772659c281761f0ea98b0ad6a20
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ arch/arm/tools/syscall.tbl        | 1 +
+ arch/arm64/include/asm/unistd32.h | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/arch/arm/tools/syscall.tbl b/arch/arm/tools/syscall.tbl
+index 63d00e4..98a1e28 100755
+--- a/arch/arm/tools/syscall.tbl
++++ b/arch/arm/tools/syscall.tbl
+@@ -412,4 +412,5 @@
+ 395	common	pkey_alloc		sys_pkey_alloc
+ 396	common	pkey_free		sys_pkey_free
+ 397	common	statx			sys_statx
++424	common	pidfd_send_signal	sys_pidfd_send_signal
+ 434	common	pidfd_open		sys_pidfd_open
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index ecc1154..b815070 100755
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -817,6 +817,8 @@ __SYSCALL(__NR_pkey_alloc, sys_pkey_alloc)
+ __SYSCALL(__NR_pkey_free, sys_pkey_free)
+ #define __NR_statx 397
+ __SYSCALL(__NR_statx, sys_statx)
++#define __NR_pidfd_send_signal 424
++__SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
+ 

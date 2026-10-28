@@ -1,0 +1,173 @@
+From 028232dacc889edba77ce49a484a6db9871cbd94 Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Sun, 28 Jul 2019 00:22:29 +0200
+Subject: [PATCH 01/10] pidfd: add P_PIDFD to waitid()
+
+This adds the P_PIDFD type to waitid().
+One of the last remaining bits for the pidfd api is to make it possible
+to wait on pidfds. With P_PIDFD added to waitid() the parts of userspace
+that want to use the pidfd api to exclusively manage processes can do so
+now.
+
+One of the things this will unblock in the future is the ability to make
+it possible to retrieve the exit status via waitid(P_PIDFD) for
+non-parent processes if handed a _suitable_ pidfd that has this feature
+set. This is similar to what you can do on FreeBSD with kqueue(). It
+might even end up being possible to wait on a process as a non-parent if
+an appropriate property is enabled on the pidfd.
+
+With P_PIDFD no scoping of the process identified by the pidfd is
+possible, i.e. it explicitly blocks things such as wait4(-1), wait4(0),
+waitid(P_ALL), waitid(P_PGID) etc. It only allows for semantics
+equivalent to wait4(pid), waitid(P_PID). Users that need scoping should
+rely on pid-based wait*() syscalls for now.
+
+Signed-off-by: Christian Brauner <christian.brauner@ubuntu.com>
+Reviewed-by: Kees Cook <keescook@chromium.org>
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Cc: Arnd Bergmann <arnd@arndb.de>
+Cc: "Eric W. Biederman" <ebiederm@xmission.com>
+Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: David Howells <dhowells@redhat.com>
+Cc: Jann Horn <jannh@google.com>
+Cc: Andy Lutomirsky <luto@kernel.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Aleksa Sarai <cyphar@cyphar.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Link: https://lore.kernel.org/r/20190727222229.6516-2-christian@brauner.io
+(cherry picked from commit 3695eae5fee0605f316fbaad0b9e3de791d7dfaf)
+---
+ include/linux/pid.h       |  4 ++++
+ include/uapi/linux/wait.h |  1 +
+ kernel/exit.c             | 33 ++++++++++++++++++++++++++++++---
+ kernel/fork.c             |  8 ++++++++
+ kernel/signal.c           |  7 +++++--
+ 5 files changed, 48 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/pid.h b/include/linux/pid.h
+index a82d2f739390..df988384927b 100644
+--- a/include/linux/pid.h
++++ b/include/linux/pid.h
+@@ -71,6 +71,10 @@ extern struct pid init_struct_pid;
+ 
+ extern const struct file_operations pidfd_fops;
+ 
++struct file;
++
++extern struct pid *pidfd_pid(const struct file *file);
++
+ static inline struct pid *get_pid(struct pid *pid)
+ {
+ 	if (pid)
+diff --git a/include/uapi/linux/wait.h b/include/uapi/linux/wait.h
+index ac49a220cf2a..85b809fc9f11 100644
+--- a/include/uapi/linux/wait.h
++++ b/include/uapi/linux/wait.h
+@@ -17,6 +17,7 @@
+ #define P_ALL		0
+ #define P_PID		1
+ #define P_PGID		2
++#define P_PIDFD		3
+ 
+ 
+ #endif /* _UAPI_LINUX_WAIT_H */
+diff --git a/kernel/exit.c b/kernel/exit.c
+index bede5a1a6eec..ca3be8bf8f5a 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -1613,6 +1613,23 @@ static long do_wait(struct wait_opts *wo)
+ 	return retval;
+ }
+ 
++static struct pid *pidfd_get_pid(unsigned int fd)
++{
++	struct fd f;
++	struct pid *pid;
++
++	f = fdget(fd);
++	if (!f.file)
++		return ERR_PTR(-EBADF);
++
++	pid = pidfd_pid(f.file);
++	if (!IS_ERR(pid))
++		get_pid(pid);
++
++	fdput(f);
++	return pid;
++}
++
+ static long kernel_waitid(int which, pid_t upid, struct waitid_info *infop,
+ 			  int options, struct rusage *ru)
+ {
+@@ -1635,19 +1652,29 @@ static long kernel_waitid(int which, pid_t upid, struct waitid_info *infop,
+ 		type = PIDTYPE_PID;
+ 		if (upid <= 0)
+ 			return -EINVAL;
++
++		pid = find_get_pid(upid);
+ 		break;
+ 	case P_PGID:
+ 		type = PIDTYPE_PGID;
+ 		if (upid <= 0)
+ 			return -EINVAL;
++
++		pid = find_get_pid(upid);
++		break;
++	case P_PIDFD:
++		type = PIDTYPE_PID;
++		if (upid < 0)
++			return -EINVAL;
++
++		pid = pidfd_get_pid(upid);
++		if (IS_ERR(pid))
++			return PTR_ERR(pid);
+ 		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+ 
+-	if (type < PIDTYPE_MAX)
+-		pid = find_get_pid(upid);
+-
+ 	wo.wo_type	= type;
+ 	wo.wo_pid	= pid;
+ 	wo.wo_flags	= options;
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 391c48a1b40d..e161107bb65d 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1659,6 +1659,14 @@ static __always_inline void delayed_free_task(struct task_struct *tsk)
+ 		free_task(tsk);
+ }
+ 
++struct pid *pidfd_pid(const struct file *file)
++{
++	if (file->f_op == &pidfd_fops)
++		return file->private_data;
++
++	return ERR_PTR(-EBADF);
++}
++
+ static int pidfd_release(struct inode *inode, struct file *file)
+ {
+ 	struct pid *pid = file->private_data;
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 125ee22f55d8..bcac96f97f24 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -3407,8 +3407,11 @@ static int copy_siginfo_from_user_any(siginfo_t *kinfo, siginfo_t __user *info)
+ 
+ static struct pid *pidfd_to_pid(const struct file *file)
+ {
+-	if (file->f_op == &pidfd_fops)
+-		return file->private_data;
++	struct pid *pid;
++
++	pid = pidfd_pid(file);
++	if (!IS_ERR(pid))
++		return pid;
+ 
+ 	return tgid_pidfd_to_pid(file);
+ }

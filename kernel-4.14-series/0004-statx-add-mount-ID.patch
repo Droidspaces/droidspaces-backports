@@ -1,0 +1,84 @@
+From 14e8f7e34e60c1baf80394ea9298fd5de9de6bdf Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@redhat.com>
+Date: Tue, 27 Oct 2026 19:46:47 +0000
+Subject: [PATCH 04/10] statx: add mount ID
+
+Systemd is hacking around to get it and it's trivial to add to statx, so...
+
+Cc: linux-api@vger.kernel.org
+Cc: linux-man@vger.kernel.org
+Signed-off-by: Miklos Szeredi <mszeredi@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+(cherry picked from commit fa2fcf4f1df1559a0a4ee0f46915b496cc2ebf60)
+
+Backport to 4.14: systemd 260 requires STATX_MNT_ID; its mount point detection
+returns EUNATCH without it and PID 1 then fails to set up /proc, /sys and /dev.
+Applied as upstream, only the context differs.
+---
+ fs/stat.c                 | 5 +++++
+ include/linux/stat.h      | 1 +
+ include/uapi/linux/stat.h | 6 +++++-
+ 3 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/fs/stat.c b/fs/stat.c
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -20,3 +20,5 @@
+ #include <linux/uaccess.h>
+ #include <asm/unistd.h>
++
++#include "mount.h"
+ 
+@@ -188,6 +190,8 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 		goto out;
+ 
+ 	error = vfs_getattr(&path, stat, request_mask, flags);
++	stat->mnt_id = real_mount(path.mnt)->mnt_id;
++	stat->result_mask |= STATX_MNT_ID;
+ 	path_put(&path);
+ 	if (retry_estale(error, lookup_flags)) {
+ 		lookup_flags |= LOOKUP_REVAL;
+@@ -564,6 +568,7 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
+ 	tmp.stx_ctime.tv_nsec = stat->ctime.tv_nsec;
+ 	tmp.stx_mtime.tv_sec = stat->mtime.tv_sec;
+ 	tmp.stx_mtime.tv_nsec = stat->mtime.tv_nsec;
++	tmp.stx_mnt_id = stat->mnt_id;
+ 	tmp.stx_rdev_major = MAJOR(stat->rdev);
+ 	tmp.stx_rdev_minor = MINOR(stat->rdev);
+ 	tmp.stx_dev_major = MAJOR(stat->dev);
+diff --git a/include/linux/stat.h b/include/linux/stat.h
+index 07295841f..4a6cf81c7 100644
+--- a/include/linux/stat.h
++++ b/include/linux/stat.h
+@@ -39,6 +39,7 @@ struct kstat {
+ 	u64		ino;
+ 	dev_t		dev;
+ 	dev_t		rdev;
++	u64		mnt_id;
+ 	kuid_t		uid;
+ 	kgid_t		gid;
+ 	loff_t		size;
+diff --git a/include/uapi/linux/stat.h b/include/uapi/linux/stat.h
+index ad80a5c88..65d002c1b 100644
+--- a/include/uapi/linux/stat.h
++++ b/include/uapi/linux/stat.h
+@@ -123,7 +123,10 @@ struct statx {
+ 	__u32	stx_dev_major;	/* ID of device containing file [uncond] */
+ 	__u32	stx_dev_minor;
+ 	/* 0x90 */
+-	__u64	__spare2[14];	/* Spare space for future expansion */
++	__u64	stx_mnt_id;
++	__u64	__spare2;
++	/* 0xa0 */
++	__u64	__spare3[12];	/* Spare space for future expansion */
+ 	/* 0x100 */
+ };
+ 
+@@ -148,6 +151,7 @@ struct statx {
+ #define STATX_BLOCKS		0x00000400U	/* Want/got stx_blocks */
+ #define STATX_BASIC_STATS	0x000007ffU	/* The stuff in the normal stat struct */
+ #define STATX_BTIME		0x00000800U	/* Want/got stx_btime */
++#define STATX_MNT_ID		0x00001000U	/* Got stx_mnt_id */
+ #define STATX_ALL		0x00000fffU	/* All currently supported flags */
+ #define STATX__RESERVED		0x80000000U	/* Reserved for future struct statx expansion */
+ 

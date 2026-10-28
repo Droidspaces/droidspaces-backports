@@ -1,0 +1,168 @@
+From 50525d2cc921f0b08affc2b66377440f06d48d51 Mon Sep 17 00:00:00 2001
+From: "Joel Fernandes (Google)" <joel@joelfernandes.org>
+Date: Tue, 30 Apr 2019 12:21:53 -0400
+Subject: [PATCH 08/12] UPSTREAM: pidfd: add polling support
+
+This patch adds polling support to pidfd.
+
+Android low memory killer (LMK) needs to know when a process dies once
+it is sent the kill signal. It does so by checking for the existence of
+/proc/pid which is both racy and slow. For example, if a PID is reused
+between when LMK sends a kill signal and checks for existence of the
+PID, since the wrong PID is now possibly checked for existence.
+Using the polling support, LMK will be able to get notified when a process
+exists in race-free and fast way, and allows the LMK to do other things
+(such as by polling on other fds) while awaiting the process being killed
+to die.
+
+For notification to polling processes, we follow the same existing
+mechanism in the kernel used when the parent of the task group is to be
+notified of a child's death (do_notify_parent). This is precisely when the
+tasks waiting on a poll of pidfd are also awakened in this patch.
+
+We have decided to include the waitqueue in struct pid for the following
+reasons:
+1. The wait queue has to survive for the lifetime of the poll. Including
+   it in task_struct would not be option in this case because the task can
+   be reaped and destroyed before the poll returns.
+
+2. By including the struct pid for the waitqueue means that during
+   de_thread(), the new thread group leader automatically gets the new
+   waitqueue/pid even though its task_struct is different.
+
+Appropriate test cases are added in the second patch to provide coverage of
+all the cases the patch is handling.
+
+Cc: Andy Lutomirski <luto@amacapital.net>
+Cc: Steven Rostedt <rostedt@goodmis.org>
+Cc: Daniel Colascione <dancol@google.com>
+Cc: Jann Horn <jannh@google.com>
+Cc: Tim Murray <timmurray@google.com>
+Cc: Jonathan Kowalski <bl0pbl33p@gmail.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: David Howells <dhowells@redhat.com>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: kernel-team@android.com
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Co-developed-by: Daniel Colascione <dancol@google.com>
+Signed-off-by: Daniel Colascione <dancol@google.com>
+Signed-off-by: Joel Fernandes (Google) <joel@joelfernandes.org>
+Signed-off-by: Christian Brauner <christian@brauner.io>
+
+(cherry picked from commit b53b0b9d9a613c418057f6cb921c2f40a6f78c24)
+
+Bug: 135608568
+Test: test program using syscall(__NR_sys_pidfd_open,..) and poll()
+Change-Id: I02f259d2875bec46b198d580edfbb067f077084e
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ include/linux/pid.h |  3 +++
+ kernel/fork.c       | 26 ++++++++++++++++++++++++++
+ kernel/pid.c        |  2 ++
+ kernel/signal.c     | 11 +++++++++++
+ 4 files changed, 42 insertions(+)
+
+diff --git a/include/linux/pid.h b/include/linux/pid.h
+index b032d8c..0cf3bf2 100755
+--- a/include/linux/pid.h
++++ b/include/linux/pid.h
+@@ -3,6 +3,7 @@
+ #define _LINUX_PID_H
+ 
+ #include <linux/rculist.h>
++#include <linux/wait.h>
+ 
+ enum pid_type
+ {
+@@ -63,6 +64,8 @@ struct pid
+ 	unsigned int level;
+ 	/* lists of tasks that use this pid */
+ 	struct hlist_head tasks[PIDTYPE_MAX];
++	/* wait queue for pidfd notifications */
++	wait_queue_head_t wait_pidfd;
+ 	struct rcu_head rcu;
+ 	struct upid numbers[1];
+ };
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 849b647..c492806 100755
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1598,8 +1598,34 @@ static void pidfd_show_fdinfo(struct seq_file *m, struct file *f)
+ }
+ #endif
+ 
++/*
++ * Poll support for process exit notification.
++ */
++static unsigned int pidfd_poll(struct file *file, struct poll_table_struct *pts)
++{
++	struct task_struct *task;
++	struct pid *pid = file->private_data;
++	int poll_flags = 0;
++
++	poll_wait(file, &pid->wait_pidfd, pts);
++
++	rcu_read_lock();
++	task = pid_task(pid, PIDTYPE_PID);
++	/*
++	 * Inform pollers only when the whole thread group exits.
++	 * If the thread group leader exits before all other threads in the
++	 * group, then poll(2) should block, similar to the wait(2) family.
++	 */
++	if (!task || (task->exit_state && thread_group_empty(task)))
++		poll_flags = POLLIN | POLLRDNORM;
++	rcu_read_unlock();
++
++	return poll_flags;
++}
++
+ const struct file_operations pidfd_fops = {
+ 	.release = pidfd_release,
++	.poll = pidfd_poll,
+ #ifdef CONFIG_PROC_FS
+ 	.show_fdinfo = pidfd_show_fdinfo,
+ #endif
+diff --git a/kernel/pid.c b/kernel/pid.c
+index f1bf276..bdb511e 100755
+--- a/kernel/pid.c
++++ b/kernel/pid.c
+@@ -332,6 +332,8 @@ struct pid *alloc_pid(struct pid_namespace *ns)
+ 	for (type = 0; type < PIDTYPE_MAX; ++type)
+ 		INIT_HLIST_HEAD(&pid->tasks[type]);
+ 
++	init_waitqueue_head(&pid->wait_pidfd);
++
+ 	upid = pid->numbers + ns->level;
+ 	spin_lock_irq(&pidmap_lock);
+ 	if (!(ns->nr_hashed & PIDNS_HASH_ADDING))
+diff --git a/kernel/signal.c b/kernel/signal.c
+index ff5dab6..65739dc 100755
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1649,6 +1649,14 @@ ret:
+ 	return ret;
+ }
+ 
++static void do_notify_pidfd(struct task_struct *task)
++{
++	struct pid *pid;
++
++	pid = task_pid(task);
++	wake_up_all(&pid->wait_pidfd);
++}
++
+ /*
+  * Let a parent know about the death of a child.
+  * For a stopped/continued status change, use do_notify_parent_cldstop instead.
+@@ -1672,6 +1680,9 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
+ 	BUG_ON(!tsk->ptrace &&
+ 	       (tsk->group_leader != tsk || !thread_group_empty(tsk)));
+ 
++	/* Wake up all pidfd waiters */
++	do_notify_pidfd(tsk);
++
+ 	if (sig != SIGCHLD) {
+ 		/*
+ 		 * This is only possible if parent == real_parent.

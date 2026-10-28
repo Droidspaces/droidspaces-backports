@@ -1,0 +1,44 @@
+From 973f12e07f440eaad28765e7bf8da776f9f54554 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 14:13:47 +0000
+Subject: [PATCH 10/10] x86: wire up close_range() and faccessat2()
+
+The two syscalls were added for arm, arm64 and the asm-generic table in the
+previous patches. This adds the x86 rows from mainline 5.8 and 5.9, which
+only matter for an x86 build such as the Cuttlefish emulator.
+
+It is a separate patch because the x86 tables in vendor 4.19 trees differ
+from Google's: some carry their pidfd_open backport without the __x64_sys_
+prefix, and the rows around 434 vary, so this hunk is the one most likely
+to need a hand edit. Skip it on a kernel that is only built for arm64.
+
+Rows taken from mainline commits 9b4feb630e8e (close_range) and
+c8ffd8bcdd28 (faccessat2).
+---
+ arch/x86/entry/syscalls/syscall_32.tbl | 2 ++
+ arch/x86/entry/syscalls/syscall_64.tbl | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/arch/x86/entry/syscalls/syscall_32.tbl b/arch/x86/entry/syscalls/syscall_32.tbl
+index 300e8015dcab..f8c561d900f2 100644
+--- a/arch/x86/entry/syscalls/syscall_32.tbl
++++ b/arch/x86/entry/syscalls/syscall_32.tbl
+@@ -400,3 +400,5 @@
+ 386	i386	rseq			sys_rseq			__ia32_sys_rseq
+ 424	i386	pidfd_send_signal	sys_pidfd_send_signal		__ia32_sys_pidfd_send_signal
+ 434	i386	pidfd_open		sys_pidfd_open			__ia32_sys_pidfd_open
++436	i386	close_range		sys_close_range			__ia32_sys_close_range
++439	i386	faccessat2		sys_faccessat2			__ia32_sys_faccessat2
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index bbfc6d440870..64d8891f1d20 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -345,6 +345,8 @@
+ 334	common	rseq			__x64_sys_rseq
+ 424	common	pidfd_send_signal	__x64_sys_pidfd_send_signal
+ 434	common	pidfd_open		__x64_sys_pidfd_open
++436	common	close_range		__x64_sys_close_range
++439	common	faccessat2		__x64_sys_faccessat2
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact

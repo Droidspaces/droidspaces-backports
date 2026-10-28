@@ -1,0 +1,51 @@
+From 9fa111b6bfff43fa3ce2a6ed51f6f7eb1b091ec2 Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@redhat.com>
+Date: Tue, 27 Oct 2026 19:48:10 +0000
+Subject: [PATCH 05/10] statx: add mount_root
+
+Determining whether a path or file descriptor refers to a mountpoint (or
+more precisely a mount root) is not trivial using current tools.
+
+Add a flag to statx that indicates whether the path or fd refers to the
+root of a mount or not.
+
+Cc: linux-api@vger.kernel.org
+Cc: linux-man@vger.kernel.org
+Reported-by: Lennart Poettering <mzxreary@0pointer.de>
+Reported-by: J. Bruce Fields <bfields@fieldses.org>
+Signed-off-by: Miklos Szeredi <mszeredi@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+(cherry picked from commit 80340fe3605c0e78cfe496c3b3878be828cfdbfe)
+
+Backport to 4.14: systemd 260 asks statx() for STATX_ATTR_MOUNT_ROOT as a
+mandatory attribute in its mount point check and fails with EUNATCH when the
+kernel does not advertise it in stx_attributes_mask. 4.14 has no STATX_ATTR_DAX,
+so the later upstream fix for the DAX/MOUNT_ROOT value overlap (72d1249e2f) is
+not needed here.
+---
+ fs/stat.c                 | 3 +++
+ include/uapi/linux/stat.h | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/fs/stat.c b/fs/stat.c
+index 1e5056327..edc9a935a 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -192,6 +192,9 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 	error = vfs_getattr(&path, stat, request_mask, flags);
+ 	stat->mnt_id = real_mount(path.mnt)->mnt_id;
+ 	stat->result_mask |= STATX_MNT_ID;
++	if (path.mnt->mnt_root == path.dentry)
++		stat->attributes |= STATX_ATTR_MOUNT_ROOT;
++	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
+ 	path_put(&path);
+ 	if (retry_estale(error, lookup_flags)) {
+ 		lookup_flags |= LOOKUP_REVAL;
+diff --git a/include/uapi/linux/stat.h b/include/uapi/linux/stat.h
+--- a/include/uapi/linux/stat.h
++++ b/include/uapi/linux/stat.h
+@@ -176,3 +176,4 @@
+ 
++#define STATX_ATTR_MOUNT_ROOT		0x00002000 /* Root of a mount */
+ 
+ #endif /* _UAPI_LINUX_STAT_H */

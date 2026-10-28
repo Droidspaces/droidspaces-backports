@@ -1,0 +1,101 @@
+From 85a88652125043ebb0d3b340142ae1bec73925bf Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian@brauner.io>
+Date: Wed, 17 Apr 2019 22:50:25 +0200
+Subject: [PATCH 05/12] BACKPORT: signal: support CLONE_PIDFD with
+ pidfd_send_signal
+
+Let pidfd_send_signal() use pidfds retrieved via CLONE_PIDFD.  With this
+patch pidfd_send_signal() becomes independent of procfs.  This fullfils
+the request made when we merged the pidfd_send_signal() patchset.  The
+pidfd_send_signal() syscall is now always available allowing for it to
+be used by users without procfs mounted or even users without procfs
+support compiled into the kernel.
+
+Signed-off-by: Christian Brauner <christian@brauner.io>
+Co-developed-by: Jann Horn <jannh@google.com>
+Signed-off-by: Jann Horn <jannh@google.com>
+Acked-by: Oleg Nesterov <oleg@redhat.com>
+Cc: Arnd Bergmann <arnd@arndb.de>
+Cc: "Eric W. Biederman" <ebiederm@xmission.com>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: David Howells <dhowells@redhat.com>
+Cc: "Michael Kerrisk (man-pages)" <mtk.manpages@gmail.com>
+Cc: Andy Lutomirsky <luto@kernel.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Aleksa Sarai <cyphar@cyphar.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+
+(cherry picked from commit 2151ad1b067275730de1b38c7257478cae47d29e)
+
+Conflicts:
+        kernel/sys_ni.c
+
+(1. Replaced COND_SYSCALL with cond_syscall.)
+
+Bug: 135608568
+Test: test program using syscall(__NR_sys_pidfd_open,..) and poll()
+Change-Id: I621fe6547397e0e68c560d7da60ef7715deb290c
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ kernel/signal.c | 12 +++++++++---
+ kernel/sys_ni.c |  1 -
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 2aac48e..1ebd9a9 100755
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -3057,7 +3057,6 @@ SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
+ 	return kill_something_info(sig, &info, pid);
+ }
+ 
+-#ifdef CONFIG_PROC_FS
+ /*
+  * Verify that the signaler and signalee either are in the same pid namespace
+  * or that the signaler's pid namespace is an ancestor of the signalee's pid
+@@ -3079,6 +3078,14 @@ static bool access_pidfd_pidns(struct pid *pid)
+ 	return true;
+ }
+ 
++static struct pid *pidfd_to_pid(const struct file *file)
++{
++	if (file->f_op == &pidfd_fops)
++		return file->private_data;
++
++	return tgid_pidfd_to_pid(file);
++}
++
+ static int copy_siginfo_from_user_any(siginfo_t *kinfo, siginfo_t __user *info)
+ {
+ #ifdef CONFIG_COMPAT
+@@ -3130,7 +3137,7 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
+ 		return -EBADF;
+ 
+ 	/* Is this a pidfd? */
+-	pid = tgid_pidfd_to_pid(f.file);
++	pid = pidfd_to_pid(f.file);
+ 	if (IS_ERR(pid)) {
+ 		ret = PTR_ERR(pid);
+ 		goto err;
+@@ -3164,7 +3171,6 @@ err:
+ 	fdput(f);
+ 	return ret;
+ }
+-#endif /* CONFIG_PROC_FS */
+ 
+ static int
+ do_send_specific(pid_t tgid, pid_t pid, int sig, struct siginfo *info)
+diff --git a/kernel/sys_ni.c b/kernel/sys_ni.c
+index e91b8a5..b518976 100755
+--- a/kernel/sys_ni.c
++++ b/kernel/sys_ni.c
+@@ -156,7 +156,6 @@ cond_syscall(compat_sys_io_submit);
+ cond_syscall(compat_sys_io_getevents);
+ cond_syscall(sys_sysfs);
+ cond_syscall(sys_syslog);
+-cond_syscall(sys_pidfd_send_signal);
+ cond_syscall(sys_process_vm_readv);
+ cond_syscall(sys_process_vm_writev);
+ cond_syscall(compat_sys_process_vm_readv);

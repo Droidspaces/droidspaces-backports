@@ -1,0 +1,68 @@
+From cedc6fb9050f9d7a547fb000b4fdf7da99601e8f Mon Sep 17 00:00:00 2001
+From: Suren Baghdasaryan <surenb@google.com>
+Date: Wed, 17 Jul 2019 13:21:00 -0400
+Subject: [PATCH 11/12] UPSTREAM: pidfd: fix a poll race when setting
+ exit_state
+
+There is a race between reading task->exit_state in pidfd_poll and
+writing it after do_notify_parent calls do_notify_pidfd. Expected
+sequence of events is:
+
+CPU 0                            CPU 1
+------------------------------------------------
+exit_notify
+  do_notify_parent
+    do_notify_pidfd
+  tsk->exit_state = EXIT_DEAD
+                                  pidfd_poll
+                                     if (tsk->exit_state)
+
+However nothing prevents the following sequence:
+
+CPU 0                            CPU 1
+------------------------------------------------
+exit_notify
+  do_notify_parent
+    do_notify_pidfd
+                                   pidfd_poll
+                                      if (tsk->exit_state)
+  tsk->exit_state = EXIT_DEAD
+
+This causes a polling task to wait forever, since poll blocks because
+exit_state is 0 and the waiting task is not notified again. A stress
+test continuously doing pidfd poll and process exits uncovered this bug.
+
+To fix it, we make sure that the task's exit_state is always set before
+calling do_notify_pidfd.
+
+Fixes: b53b0b9d9a6 ("pidfd: add polling support")
+Cc: kernel-team@android.com
+Cc: Oleg Nesterov <oleg@redhat.com>
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+Signed-off-by: Joel Fernandes (Google) <joel@joelfernandes.org>
+Link: https://lore.kernel.org/r/20190717172100.261204-1-joel@joelfernandes.org
+[christian@brauner.io: adapt commit message and drop unneeded changes from wait_task_zombie]
+Signed-off-by: Christian Brauner <christian@brauner.io>
+
+(cherry picked from commit b191d6491be67cef2b3fa83015561caca1394ab9)
+
+Bug: 135608568
+Test: test program using syscall(__NR_sys_pidfd_open,..) and poll()
+Change-Id: I043e54c9b69f25de88f6f19ae167920af8532de2
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ kernel/exit.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/kernel/exit.c b/kernel/exit.c
+index 8ebc7df..44e601d 100755
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -723,6 +723,7 @@ static void exit_notify(struct task_struct *tsk, int group_dead)
+ 	if (group_dead)
+ 		kill_orphaned_pgrp(tsk->group_leader, NULL);
+ 
++	tsk->exit_state = EXIT_ZOMBIE;
+ 	if (unlikely(tsk->ptrace)) {
+ 		int sig = thread_group_leader(tsk) &&
+ 				thread_group_empty(tsk) &&
