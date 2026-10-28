@@ -1,0 +1,297 @@
+From dcd06a8cc305f08c5d236a1216970b90f03c314b Mon Sep 17 00:00:00 2001
+From: David Herrmann <dh.herrmann@gmail.com>
+Date: Wed, 28 Oct 2026 16:39:24 +0000
+Subject: [PATCH 11/14] net: introduce SO_PEERGROUPS getsockopt
+
+This adds the new getsockopt(2) option SO_PEERGROUPS on SOL_SOCKET to
+retrieve the auxiliary groups of the remote peer. It is designed to
+naturally extend SO_PEERCRED. That is, the underlying data is from the
+same credentials. Regarding its syntax, it is based on SO_PEERSEC. That
+is, if the provided buffer is too small, ERANGE is returned and @optlen
+is updated. Otherwise, the information is copied, @optlen is set to the
+actual size, and 0 is returned.
+
+While SO_PEERCRED (and thus `struct ucred') already returns the primary
+group, it lacks the auxiliary group vector. However, nearly all access
+controls (including kernel side VFS and SYSVIPC, but also user-space
+polkit, DBus, ...) consider the entire set of groups, rather than just
+the primary group. But this is currently not possible with pure
+SO_PEERCRED. Instead, user-space has to work around this and query the
+system database for the auxiliary groups of a UID retrieved via
+SO_PEERCRED.
+
+Unfortunately, there is no race-free way to query the auxiliary groups
+of the PID/UID retrieved via SO_PEERCRED. Hence, the current user-space
+solution is to use getgrouplist(3p), which itself falls back to NSS and
+whatever is configured in nsswitch.conf(3). This effectively checks
+which groups we *would* assign to the user if it logged in *now*. On
+normal systems it is as easy as reading /etc/group, but with NSS it can
+resort to quering network databases (eg., LDAP), using IPC or network
+communication.
+
+Long story short: Whenever we want to use auxiliary groups for access
+checks on IPC, we need further IPC to talk to the user/group databases,
+rather than just relying on SO_PEERCRED and the incoming socket. This
+is unfortunate, and might even result in dead-locks if the database
+query uses the same IPC as the original request.
+
+So far, those recursions / dead-locks have been avoided by using
+primitive IPC for all crucial NSS modules. However, we want to avoid
+re-inventing the wheel for each NSS module that might be involved in
+user/group queries. Hence, we would preferably make DBus (and other IPC
+that supports access-management based on groups) work without resorting
+to the user/group database. This new SO_PEERGROUPS ioctl would allow us
+to make dbus-daemon work without ever calling into NSS.
+
+Cc: Michal Sekletar <msekleta@redhat.com>
+Cc: Simon McVittie <simon.mcvittie@collabora.co.uk>
+Reviewed-by: Tom Gundersen <teg@jklm.no>
+Signed-off-by: David Herrmann <dh.herrmann@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+
+(cherry picked from commit 28b5ba2aa0f55d80adb2624564ed2b170c19519e)
+
+Backport to 4.9: sd-bus and varlink call getpeergroups() on every
+connection; without the option they log the error and fall back to the
+primary group only. The define carries the mainline values (59, parisc
+0x4034, sparc 0x003d); it is placed like SO_BINDTOIFINDEX in the previous
+patch (after SO_COOKIE in the per-architecture headers, next to
+SO_BINDTOIFINDEX in asm-generic) for the same reason. The
+group_info->gid[] array layout this reads already exists in 4.9.
+---
+ arch/alpha/include/uapi/asm/socket.h   |  2 ++
+ arch/avr32/include/uapi/asm/socket.h   |  2 ++
+ arch/frv/include/uapi/asm/socket.h     |  2 ++
+ arch/ia64/include/uapi/asm/socket.h    |  2 ++
+ arch/m32r/include/uapi/asm/socket.h    |  2 ++
+ arch/mips/include/uapi/asm/socket.h    |  2 ++
+ arch/mn10300/include/uapi/asm/socket.h |  2 ++
+ arch/parisc/include/uapi/asm/socket.h  |  2 ++
+ arch/powerpc/include/uapi/asm/socket.h |  2 ++
+ arch/s390/include/uapi/asm/socket.h    |  2 ++
+ arch/sparc/include/uapi/asm/socket.h   |  2 ++
+ arch/xtensa/include/uapi/asm/socket.h  |  2 ++
+ include/uapi/asm-generic/socket.h      |  2 ++
+ net/core/sock.c                        | 33 ++++++++++++++++++++++++++
+ 14 files changed, 59 insertions(+)
+
+diff --git a/arch/alpha/include/uapi/asm/socket.h b/arch/alpha/include/uapi/asm/socket.h
+index 8a93bb3bd17..ec2177386e9 100644
+--- a/arch/alpha/include/uapi/asm/socket.h
++++ b/arch/alpha/include/uapi/asm/socket.h
+@@ -99,6 +99,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _UAPI_ASM_SOCKET_H */
+diff --git a/arch/avr32/include/uapi/asm/socket.h b/arch/avr32/include/uapi/asm/socket.h
+index 1b6cf3ab90e..256dca3199f 100644
+--- a/arch/avr32/include/uapi/asm/socket.h
++++ b/arch/avr32/include/uapi/asm/socket.h
+@@ -92,6 +92,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _UAPI__ASM_AVR32_SOCKET_H */
+diff --git a/arch/frv/include/uapi/asm/socket.h b/arch/frv/include/uapi/asm/socket.h
+index 818ea28b2c8..4cc3a46b5d7 100644
+--- a/arch/frv/include/uapi/asm/socket.h
++++ b/arch/frv/include/uapi/asm/socket.h
+@@ -92,6 +92,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _ASM_SOCKET_H */
+diff --git a/arch/ia64/include/uapi/asm/socket.h b/arch/ia64/include/uapi/asm/socket.h
+index 9d84d84c3e6..dc2e1f055c3 100644
+--- a/arch/ia64/include/uapi/asm/socket.h
++++ b/arch/ia64/include/uapi/asm/socket.h
+@@ -101,6 +101,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _ASM_IA64_SOCKET_H */
+diff --git a/arch/m32r/include/uapi/asm/socket.h b/arch/m32r/include/uapi/asm/socket.h
+index b2053d2122e..c782012ef47 100644
+--- a/arch/m32r/include/uapi/asm/socket.h
++++ b/arch/m32r/include/uapi/asm/socket.h
+@@ -92,6 +92,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _ASM_M32R_SOCKET_H */
+diff --git a/arch/mips/include/uapi/asm/socket.h b/arch/mips/include/uapi/asm/socket.h
+index a0517447f76..4314ac5ca6b 100644
+--- a/arch/mips/include/uapi/asm/socket.h
++++ b/arch/mips/include/uapi/asm/socket.h
+@@ -110,6 +110,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _UAPI_ASM_SOCKET_H */
+diff --git a/arch/mn10300/include/uapi/asm/socket.h b/arch/mn10300/include/uapi/asm/socket.h
+index 25b532bbf42..9b5eafd2448 100644
+--- a/arch/mn10300/include/uapi/asm/socket.h
++++ b/arch/mn10300/include/uapi/asm/socket.h
+@@ -92,6 +92,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _ASM_SOCKET_H */
+diff --git a/arch/parisc/include/uapi/asm/socket.h b/arch/parisc/include/uapi/asm/socket.h
+index f0d2c8fa4d1..5225dcf6531 100644
+--- a/arch/parisc/include/uapi/asm/socket.h
++++ b/arch/parisc/include/uapi/asm/socket.h
+@@ -91,6 +91,8 @@
+ 
+ #define SO_COOKIE		0x4032
+ 
++#define SO_PEERGROUPS		0x4034
++
+ #define SO_BINDTOIFINDEX	0x4037
+ 
+ #endif /* _UAPI_ASM_SOCKET_H */
+diff --git a/arch/powerpc/include/uapi/asm/socket.h b/arch/powerpc/include/uapi/asm/socket.h
+index 97caa3c51df..37b2435dfb2 100644
+--- a/arch/powerpc/include/uapi/asm/socket.h
++++ b/arch/powerpc/include/uapi/asm/socket.h
+@@ -99,6 +99,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif	/* _ASM_POWERPC_SOCKET_H */
+diff --git a/arch/s390/include/uapi/asm/socket.h b/arch/s390/include/uapi/asm/socket.h
+index cc8b6a89451..951f64d28a3 100644
+--- a/arch/s390/include/uapi/asm/socket.h
++++ b/arch/s390/include/uapi/asm/socket.h
+@@ -98,6 +98,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif /* _ASM_SOCKET_H */
+diff --git a/arch/sparc/include/uapi/asm/socket.h b/arch/sparc/include/uapi/asm/socket.h
+index 48ff2c3317b..b178d2d4ef1 100644
+--- a/arch/sparc/include/uapi/asm/socket.h
++++ b/arch/sparc/include/uapi/asm/socket.h
+@@ -88,6 +88,8 @@
+ 
+ #define SO_COOKIE		0x003b
+ 
++#define SO_PEERGROUPS		0x003d
++
+ #define SO_BINDTOIFINDEX	0x0041
+ 
+ /* Security levels - as per NRL IPv6 - don't actually do anything */
+diff --git a/arch/xtensa/include/uapi/asm/socket.h b/arch/xtensa/include/uapi/asm/socket.h
+index 2b1a96ad815..a1a3cebac38 100644
+--- a/arch/xtensa/include/uapi/asm/socket.h
++++ b/arch/xtensa/include/uapi/asm/socket.h
+@@ -103,6 +103,8 @@
+ 
+ #define SO_COOKIE		57
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_BINDTOIFINDEX	62
+ 
+ #endif	/* _XTENSA_SOCKET_H */
+diff --git a/include/uapi/asm-generic/socket.h b/include/uapi/asm-generic/socket.h
+index 0290918e5b9..98fd292a5ee 100644
+--- a/include/uapi/asm-generic/socket.h
++++ b/include/uapi/asm-generic/socket.h
+@@ -92,6 +92,8 @@
+ 
+ #define SO_BINDTOIFINDEX	62
+ 
++#define SO_PEERGROUPS		59
++
+ #define SO_CNX_ADVICE		53
+ 
+ #define SO_COOKIE		57
+diff --git a/net/core/sock.c b/net/core/sock.c
+index 9f375ba376a..a7cc73b7fec 100644
+--- a/net/core/sock.c
++++ b/net/core/sock.c
+@@ -1054,6 +1054,18 @@ static void cred_to_ucred(struct pid *pid, const struct cred *cred,
+ 	}
+ }
+ 
++static int groups_to_user(gid_t __user *dst, const struct group_info *src)
++{
++	struct user_namespace *user_ns = current_user_ns();
++	int i;
++
++	for (i = 0; i < src->ngroups; i++)
++		if (put_user(from_kgid_munged(user_ns, src->gid[i]), dst + i))
++			return -EFAULT;
++
++	return 0;
++}
++
+ int sock_getsockopt(struct socket *sock, int level, int optname,
+ 		    char __user *optval, int __user *optlen)
+ {
+@@ -1211,6 +1223,27 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
+ 		goto lenout;
+ 	}
+ 
++	case SO_PEERGROUPS:
++	{
++		int ret, n;
++
++		if (!sk->sk_peer_cred)
++			return -ENODATA;
++
++		n = sk->sk_peer_cred->group_info->ngroups;
++		if (len < n * sizeof(gid_t)) {
++			len = n * sizeof(gid_t);
++			return put_user(len, optlen) ? -EFAULT : -ERANGE;
++		}
++		len = n * sizeof(gid_t);
++
++		ret = groups_to_user((gid_t __user *)optval,
++				     sk->sk_peer_cred->group_info);
++		if (ret)
++			return ret;
++		goto lenout;
++	}
++
+ 	case SO_PEERNAME:
+ 	{
+ 		char address[128];

@@ -1,0 +1,57 @@
+From 68defbc4c84b24dcb29089612fb9fa45fed361d5 Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian@brauner.io>
+Date: Thu, 18 Apr 2019 12:18:39 +0200
+Subject: [PATCH] UPSTREAM: signal: use fdget() since we don't allow O_PATH
+
+As stated in the original commit for pidfd_send_signal() we don't allow
+to signal processes through O_PATH file descriptors since it is
+semantically equivalent to a write on the pidfd.
+
+We already correctly error out right now and return EBADF if an O_PATH
+fd is passed.  This is because we use file->f_op to detect whether a
+pidfd is passed and O_PATH fds have their file->f_op set to empty_fops
+in do_dentry_open() and thus fail the test.
+
+Thus, there is no regression.  It's just semantically correct to use
+fdget() and return an error right from there instead of taking a
+reference and returning an error later.
+
+Signed-off-by: Christian Brauner <christian@brauner.io>
+Acked-by: Oleg Nesterov <oleg@redhat.com>
+Cc: Arnd Bergmann <arnd@arndb.de>
+Cc: "Eric W. Biederman" <ebiederm@xmission.com>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Jann Horn <jann@thejh.net>
+Cc: David Howells <dhowells@redhat.com>
+Cc: "Michael Kerrisk (man-pages)" <mtk.manpages@gmail.com>
+Cc: Andy Lutomirsky <luto@kernel.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Oleg Nesterov <oleg@redhat.com>
+Cc: Aleksa Sarai <cyphar@cyphar.com>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+(cherry picked from commit 738a7832d21e3d911fcddab98ce260b79010b461)
+
+Bug: 135608568
+Test: test program using syscall(__NR_pidfd_send_signal,..) to send SIGKILL
+Change-Id: Id52eaadf9da371fb2d9caae4df49627760de7229
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ kernel/signal.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 3da95023fd6..1a75001caa6 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -3014,7 +3014,7 @@ SYSCALL_DEFINE4(pidfd_send_signal, int, pidfd, int, sig,
+ 	if (flags)
+ 		return -EINVAL;
+ 
+-	f = fdget_raw(pidfd);
++	f = fdget(pidfd);
+ 	if (!f.file)
+ 		return -EBADF;
+ 

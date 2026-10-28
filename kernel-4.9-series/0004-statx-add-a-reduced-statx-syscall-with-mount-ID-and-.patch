@@ -1,0 +1,402 @@
+From d41f996c60edb17024d3035b3ccbe1112e744788 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 16:34:22 +0000
+Subject: [PATCH 04/14] statx: add a reduced statx() syscall with mount ID and
+ mount root
+
+Kernel 4.9 predates statx() (v4.11) and systemd 258 removed its statx
+fallback: stat-util uses statx() everywhere, the mount-point checks in
+mount_setup() need STATX_MNT_ID (v5.8) and STATX_ATTR_MOUNT_ROOT (v5.8),
+and PID 1 dies with "Failed to determine whether /proc is a mount point"
+without them.
+
+The mainline statx commit (a528d35e8bfc) changes the getattr() signature
+of every filesystem, 72 files, and Android vendor trees carry their own
+filesystems (sdcardfs, esdfs, Samsung's fs changes) that would all need
+the same treatment. systemd does not need any of that: it reads the
+basic stat fields, the mount ID and the mount-root bit.
+
+So this implements statx() on top of the existing vfs_getattr() path:
+STATX_BASIC_STATS (minus atime on MS_NOATIME filesystems, as mainline),
+STATX_MNT_ID, STATX_ATTR_MOUNT_ROOT and STATX_ATTR_AUTOMOUNT are
+reported; STATX_BTIME and the per-filesystem attribute bits are
+reported as unsupported by leaving their mask bits clear, which is
+exactly what mainline reports for a filesystem that does not implement
+them. The uapi header, the AT_STATX_* flags and the struct layout are
+copied from v5.8 unchanged (STATX_ATTR_DAX carries the v5.9 value, v5.8's
+collided with STATX_ATTR_MOUNT_ROOT), so a userspace built against
+current headers sees the same ABI.
+
+Wired up for the asm-generic table (291, arm64) and the arm64 compat
+table (397). x86 and 32-bit ARM are in a separate patch.
+---
+ arch/arm64/include/asm/unistd32.h |   2 +
+ fs/stat.c                         | 130 +++++++++++++++++++++++++++
+ include/linux/syscalls.h          |   3 +
+ include/uapi/asm-generic/unistd.h |   2 +
+ include/uapi/linux/fcntl.h        |   5 ++
+ include/uapi/linux/stat.h         | 142 ++++++++++++++++++++++++++++++
+ 6 files changed, 284 insertions(+)
+
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index 491a1914e83..2b53aae610e 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -809,6 +809,8 @@ __SYSCALL(__NR_copy_file_range, sys_copy_file_range)
+ __SYSCALL(__NR_preadv2, compat_sys_preadv2)
+ #define __NR_pwritev2 393
+ __SYSCALL(__NR_pwritev2, compat_sys_pwritev2)
++#define __NR_statx 397
++__SYSCALL(__NR_statx, sys_statx)
+ #define __NR_pidfd_send_signal 424
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+diff --git a/fs/stat.c b/fs/stat.c
+index 068fdbcc9e2..c241d7cbf74 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -18,6 +18,8 @@
+ #include <asm/uaccess.h>
+ #include <asm/unistd.h>
+ 
++#include "mount.h"
++
+ void generic_fillattr(struct inode *inode, struct kstat *stat)
+ {
+ 	stat->dev = inode->i_sb->s_dev;
+@@ -130,6 +132,134 @@ int vfs_lstat(const char __user *name, struct kstat *stat)
+ }
+ EXPORT_SYMBOL(vfs_lstat);
+ 
++/*
++ * statx() on this kernel answers from the same ->getattr() path that stat()
++ * uses, so it reports STATX_BASIC_STATS, the mount ID and the mount-root and
++ * automount attributes. STATX_BTIME and the per-filesystem attribute bits are
++ * reported as unsupported (their mask bits stay clear), which is also what a
++ * mainline kernel reports for a filesystem that does not implement them.
++ * Changing every filesystem's getattr signature, as v4.11 did, is not needed
++ * for that.
++ */
++struct kstatx {
++	struct kstat	stat;
++	u32		result_mask;
++	u64		attributes;
++	u64		attributes_mask;
++	u64		mnt_id;
++};
++
++static int vfs_statx(int dfd, const char __user *filename, unsigned int flags,
++		     struct kstatx *sx)
++{
++	struct path path;
++	struct inode *inode;
++	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
++	int error;
++
++	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
++		       AT_EMPTY_PATH | AT_STATX_SYNC_TYPE)) != 0)
++		return -EINVAL;
++
++	if (flags & AT_SYMLINK_NOFOLLOW)
++		lookup_flags &= ~LOOKUP_FOLLOW;
++	if (flags & AT_NO_AUTOMOUNT)
++		lookup_flags &= ~LOOKUP_AUTOMOUNT;
++	if (flags & AT_EMPTY_PATH)
++		lookup_flags |= LOOKUP_EMPTY;
++retry:
++	error = user_path_at(dfd, filename, lookup_flags, &path);
++	if (error)
++		return error;
++
++	memset(sx, 0, sizeof(*sx));
++	error = vfs_getattr(&path, &sx->stat);
++
++	inode = d_backing_inode(path.dentry);
++	sx->result_mask = STATX_BASIC_STATS | STATX_MNT_ID;
++	/* MS_NOATIME means the filesystem supplies a dummy atime value */
++	if (inode->i_sb->s_flags & MS_NOATIME)
++		sx->result_mask &= ~STATX_ATIME;
++	if (IS_AUTOMOUNT(inode))
++		sx->attributes |= STATX_ATTR_AUTOMOUNT;
++	if (path.mnt->mnt_root == path.dentry)
++		sx->attributes |= STATX_ATTR_MOUNT_ROOT;
++	sx->attributes_mask = STATX_ATTR_AUTOMOUNT | STATX_ATTR_MOUNT_ROOT;
++	sx->mnt_id = real_mount(path.mnt)->mnt_id;
++
++	path_put(&path);
++	if (retry_estale(error, lookup_flags)) {
++		lookup_flags |= LOOKUP_REVAL;
++		goto retry;
++	}
++	return error;
++}
++
++static noinline_for_stack int
++cp_statx(const struct kstatx *sx, struct statx __user *buffer)
++{
++	const struct kstat *stat = &sx->stat;
++	struct statx tmp;
++
++	memset(&tmp, 0, sizeof(tmp));
++
++	tmp.stx_mask = sx->result_mask;
++	tmp.stx_blksize = stat->blksize;
++	tmp.stx_attributes = sx->attributes;
++	tmp.stx_nlink = stat->nlink;
++	tmp.stx_uid = from_kuid_munged(current_user_ns(), stat->uid);
++	tmp.stx_gid = from_kgid_munged(current_user_ns(), stat->gid);
++	tmp.stx_mode = stat->mode;
++	tmp.stx_ino = stat->ino;
++	tmp.stx_size = stat->size;
++	tmp.stx_blocks = stat->blocks;
++	tmp.stx_attributes_mask = sx->attributes_mask;
++	tmp.stx_atime.tv_sec = stat->atime.tv_sec;
++	tmp.stx_atime.tv_nsec = stat->atime.tv_nsec;
++	tmp.stx_ctime.tv_sec = stat->ctime.tv_sec;
++	tmp.stx_ctime.tv_nsec = stat->ctime.tv_nsec;
++	tmp.stx_mtime.tv_sec = stat->mtime.tv_sec;
++	tmp.stx_mtime.tv_nsec = stat->mtime.tv_nsec;
++	tmp.stx_rdev_major = MAJOR(stat->rdev);
++	tmp.stx_rdev_minor = MINOR(stat->rdev);
++	tmp.stx_dev_major = MAJOR(stat->dev);
++	tmp.stx_dev_minor = MINOR(stat->dev);
++	tmp.stx_mnt_id = sx->mnt_id;
++
++	return copy_to_user(buffer, &tmp, sizeof(tmp)) ? -EFAULT : 0;
++}
++
++/**
++ * sys_statx - System call to get enhanced stats
++ * @dfd: Base directory to pathwalk from *or* fd to stat.
++ * @filename: File to stat or "" with AT_EMPTY_PATH
++ * @flags: AT_* flags to control pathwalk.
++ * @mask: Parts of statx struct actually required.
++ * @buffer: Result buffer.
++ *
++ * Note that fstat() can be emulated by setting dfd to the fd of interest,
++ * supplying "" as the filename and setting AT_EMPTY_PATH in the flags.
++ */
++SYSCALL_DEFINE5(statx,
++		int, dfd, const char __user *, filename, unsigned, flags,
++		unsigned int, mask,
++		struct statx __user *, buffer)
++{
++	struct kstatx sx;
++	int error;
++
++	if (mask & STATX__RESERVED)
++		return -EINVAL;
++	if ((flags & AT_STATX_SYNC_TYPE) == AT_STATX_SYNC_TYPE)
++		return -EINVAL;
++
++	error = vfs_statx(dfd, filename, flags, &sx);
++	if (error)
++		return error;
++
++	return cp_statx(&sx, buffer);
++}
++
+ 
+ #ifdef __ARCH_WANT_OLD_STAT
+ 
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index 06c3550dbf7..17def20e694 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -47,6 +47,7 @@ struct sockaddr;
+ struct stat;
+ struct stat64;
+ struct statfs;
++struct statx;
+ struct statfs64;
+ struct __sysctl_args;
+ struct sysinfo;
+@@ -923,6 +924,8 @@ asmlinkage long sys_pkey_mprotect(unsigned long start, size_t len,
+ 				  unsigned long prot, int pkey);
+ asmlinkage long sys_pkey_alloc(unsigned long flags, unsigned long init_val);
+ asmlinkage long sys_pkey_free(int pkey);
++asmlinkage long sys_statx(int dfd, const char __user *path, unsigned flags,
++			  unsigned mask, struct statx __user *buffer);
+ asmlinkage long sys_pidfd_send_signal(int pidfd, int sig,
+ 				       siginfo_t __user *info,
+ 				       unsigned int flags);
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index 9fb4a5707a3..f6ad07f9887 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -730,6 +730,8 @@ __SYSCALL(__NR_pkey_mprotect, sys_pkey_mprotect)
+ __SYSCALL(__NR_pkey_alloc,    sys_pkey_alloc)
+ #define __NR_pkey_free 290
+ __SYSCALL(__NR_pkey_free,     sys_pkey_free)
++#define __NR_statx 291
++__SYSCALL(__NR_statx,     sys_statx)
+ #define __NR_pidfd_send_signal 424
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+diff --git a/include/uapi/linux/fcntl.h b/include/uapi/linux/fcntl.h
+index f85ed3a5ef4..ec69d55bcec 100644
+--- a/include/uapi/linux/fcntl.h
++++ b/include/uapi/linux/fcntl.h
+@@ -84,5 +84,10 @@
+ #define AT_NO_AUTOMOUNT		0x800	/* Suppress terminal automount traversal */
+ #define AT_EMPTY_PATH		0x1000	/* Allow empty relative pathname */
+ 
++#define AT_STATX_SYNC_TYPE	0x6000	/* Type of synchronisation required from statx() */
++#define AT_STATX_SYNC_AS_STAT	0x0000	/* - Do whatever stat() does */
++#define AT_STATX_FORCE_SYNC	0x2000	/* - Force the attributes to be sync'd with the server */
++#define AT_STATX_DONT_SYNC	0x4000	/* - Don't sync attributes with the server */
++
+ 
+ #endif /* _UAPI_LINUX_FCNTL_H */
+diff --git a/include/uapi/linux/stat.h b/include/uapi/linux/stat.h
+index 7fec7e36d92..20b876fd56e 100644
+--- a/include/uapi/linux/stat.h
++++ b/include/uapi/linux/stat.h
+@@ -41,5 +41,147 @@
+ 
+ #endif
+ 
++/*
++ * Timestamp structure for the timestamps in struct statx.
++ *
++ * tv_sec holds the number of seconds before (negative) or after (positive)
++ * 00:00:00 1st January 1970 UTC.
++ *
++ * tv_nsec holds a number of nanoseconds (0..999,999,999) after the tv_sec time.
++ *
++ * __reserved is held in case we need a yet finer resolution.
++ */
++struct statx_timestamp {
++	__s64	tv_sec;
++	__u32	tv_nsec;
++	__s32	__reserved;
++};
++
++/*
++ * Structures for the extended file attribute retrieval system call
++ * (statx()).
++ *
++ * The caller passes a mask of what they're specifically interested in as a
++ * parameter to statx().  What statx() actually got will be indicated in
++ * st_mask upon return.
++ *
++ * For each bit in the mask argument:
++ *
++ * - if the datum is not supported:
++ *
++ *   - the bit will be cleared, and
++ *
++ *   - the datum will be set to an appropriate fabricated value if one is
++ *     available (eg. CIFS can take a default uid and gid), otherwise
++ *
++ *   - the field will be cleared;
++ *
++ * - otherwise, if explicitly requested:
++ *
++ *   - the datum will be synchronised to the server if AT_STATX_FORCE_SYNC is
++ *     set or if the datum is considered out of date, and
++ *
++ *   - the field will be filled in and the bit will be set;
++ *
++ * - otherwise, if not requested, but available in approximate form without any
++ *   effort, it will be filled in anyway, and the bit will be set upon return
++ *   (it might not be up to date, however, and no attempt will be made to
++ *   synchronise the internal state first);
++ *
++ * - otherwise the field and the bit will be cleared before returning.
++ *
++ * Items in STATX_BASIC_STATS may be marked unavailable on return, but they
++ * will have values installed for compatibility purposes so that stat() and
++ * co. can be emulated in userspace.
++ */
++struct statx {
++	/* 0x00 */
++	__u32	stx_mask;	/* What results were written [uncond] */
++	__u32	stx_blksize;	/* Preferred general I/O size [uncond] */
++	__u64	stx_attributes;	/* Flags conveying information about the file [uncond] */
++	/* 0x10 */
++	__u32	stx_nlink;	/* Number of hard links */
++	__u32	stx_uid;	/* User ID of owner */
++	__u32	stx_gid;	/* Group ID of owner */
++	__u16	stx_mode;	/* File mode */
++	__u16	__spare0[1];
++	/* 0x20 */
++	__u64	stx_ino;	/* Inode number */
++	__u64	stx_size;	/* File size */
++	__u64	stx_blocks;	/* Number of 512-byte blocks allocated */
++	__u64	stx_attributes_mask; /* Mask to show what's supported in stx_attributes */
++	/* 0x40 */
++	struct statx_timestamp	stx_atime;	/* Last access time */
++	struct statx_timestamp	stx_btime;	/* File creation time */
++	struct statx_timestamp	stx_ctime;	/* Last attribute change time */
++	struct statx_timestamp	stx_mtime;	/* Last data modification time */
++	/* 0x80 */
++	__u32	stx_rdev_major;	/* Device ID of special file [if bdev/cdev] */
++	__u32	stx_rdev_minor;
++	__u32	stx_dev_major;	/* ID of device containing file [uncond] */
++	__u32	stx_dev_minor;
++	/* 0x90 */
++	__u64	stx_mnt_id;
++	__u64	__spare2;
++	/* 0xa0 */
++	__u64	__spare3[12];	/* Spare space for future expansion */
++	/* 0x100 */
++};
++
++/*
++ * Flags to be stx_mask
++ *
++ * Query request/result mask for statx() and struct statx::stx_mask.
++ *
++ * These bits should be set in the mask argument of statx() to request
++ * particular items when calling statx().
++ */
++#define STATX_TYPE		0x00000001U	/* Want/got stx_mode & S_IFMT */
++#define STATX_MODE		0x00000002U	/* Want/got stx_mode & ~S_IFMT */
++#define STATX_NLINK		0x00000004U	/* Want/got stx_nlink */
++#define STATX_UID		0x00000008U	/* Want/got stx_uid */
++#define STATX_GID		0x00000010U	/* Want/got stx_gid */
++#define STATX_ATIME		0x00000020U	/* Want/got stx_atime */
++#define STATX_MTIME		0x00000040U	/* Want/got stx_mtime */
++#define STATX_CTIME		0x00000080U	/* Want/got stx_ctime */
++#define STATX_INO		0x00000100U	/* Want/got stx_ino */
++#define STATX_SIZE		0x00000200U	/* Want/got stx_size */
++#define STATX_BLOCKS		0x00000400U	/* Want/got stx_blocks */
++#define STATX_BASIC_STATS	0x000007ffU	/* The stuff in the normal stat struct */
++#define STATX_BTIME		0x00000800U	/* Want/got stx_btime */
++#define STATX_MNT_ID		0x00001000U	/* Got stx_mnt_id */
++
++#define STATX__RESERVED		0x80000000U	/* Reserved for future struct statx expansion */
++
++#ifndef __KERNEL__
++/*
++ * This is deprecated, and shall remain the same value in the future.  To avoid
++ * confusion please use the equivalent (STATX_BASIC_STATS | STATX_BTIME)
++ * instead.
++ */
++#define STATX_ALL		0x00000fffU
++#endif
++
++/*
++ * Attributes to be found in stx_attributes and masked in stx_attributes_mask.
++ *
++ * These give information about the features or the state of a file that might
++ * be of use to ordinary userspace programs such as GUIs or ls rather than
++ * specialised tools.
++ *
++ * Note that the flags marked [I] correspond to generic FS_IOC_FLAGS
++ * semantically.  Where possible, the numerical value is picked to correspond
++ * also.
++ */
++#define STATX_ATTR_COMPRESSED		0x00000004 /* [I] File is compressed by the fs */
++#define STATX_ATTR_IMMUTABLE		0x00000010 /* [I] File is marked immutable */
++#define STATX_ATTR_APPEND		0x00000020 /* [I] File is append-only */
++#define STATX_ATTR_NODUMP		0x00000040 /* [I] File is not to be dumped */
++#define STATX_ATTR_ENCRYPTED		0x00000800 /* [I] File requires key to decrypt in fs */
++#define STATX_ATTR_AUTOMOUNT		0x00001000 /* Dir: Automount trigger */
++#define STATX_ATTR_MOUNT_ROOT		0x00002000 /* Root of a mount */
++#define STATX_ATTR_VERITY		0x00100000 /* [I] Verity protected file */
++#define STATX_ATTR_DAX			0x00200000 /* [I] File is DAX */
++
+ 
+ #endif /* _UAPI_LINUX_STAT_H */

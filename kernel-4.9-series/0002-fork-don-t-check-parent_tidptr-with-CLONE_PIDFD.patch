@@ -1,0 +1,84 @@
+From e3f3d4d56bf6a6dc7d49a1cfaa8c6351e4a29485 Mon Sep 17 00:00:00 2001
+From: "Dmitry V. Levin" <ldv@altlinux.org>
+Date: Wed, 28 Oct 2026 16:29:17 +0000
+Subject: [PATCH 02/14] fork: don't check parent_tidptr with CLONE_PIDFD
+
+Give userspace a cheap and reliable way to tell whether CLONE_PIDFD is
+supported by the kernel or not.  The easiest way is to pass an invalid
+file descriptor value in parent_tidptr, perform the syscall and verify
+that parent_tidptr has been changed to a valid file descriptor value.
+
+CLONE_PIDFD uses parent_tidptr to return pidfds.  CLONE_PARENT_SETTID
+will use parent_tidptr to return the tid of the parent.  The two flags
+cannot be used together.  Old kernels that only support
+CLONE_PARENT_SETTID will not verify the value pointed to by
+parent_tidptr.  This behavior is unchanged even with the introduction of
+CLONE_PIDFD.
+However, if CLONE_PIDFD is specified the kernel will currently check the
+value pointed to by parent_tidptr before placing the pidfd in the memory
+pointed to.  EINVAL will be returned if the value in parent_tidptr is not
+0.
+
+If CLONE_PIDFD is supported and fd 0 is closed, then the returned pidfd
+can and likely will be 0 and parent_tidptr will be unchanged.  This
+means userspace must either check CLONE_PIDFD support beforehand or
+check that fd 0 is not closed when invoking CLONE_PIDFD.
+
+The check for pidfd == 0 was introduced during the v5.2 merge window by
+commit b3e583825266 ("clone: add CLONE_PIDFD") to ensure that
+CLONE_PIDFD could be potentially extended by passing in flags through
+the return argument.
+
+However, that extension would look horrible, and with the upcoming
+introduction of the clone3 syscall in v5.3 there is no need to extend
+legacy clone syscall this way.  (Even if it would need to be extended,
+CLONE_DETACHED can be reused with CLONE_PIDFD.)
+
+So remove the pidfd == 0 check.  Userspace that needs to be portable to
+kernels without CLONE_PIDFD support can follow the advice above.
+
+Fixes: b3e583825266 ("clone: add CLONE_PIDFD")
+Signed-off-by: Dmitry V. Levin <ldv@altlinux.org>
+Signed-off-by: Christian Brauner <christian@brauner.io>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+(cherry picked from commit 9014143bab2f3bc0b9e5db03e5f8e4ab2d42b5ab)
+
+Backport to 4.9: the Android 4.9 pidfd backport kept the parent_tidptr == 0
+check that mainline dropped in v5.3. glibc initialises its pidfd slot to 0
+so it is not hit by it, but any caller that passes an uninitialised slot
+gets EINVAL instead of a pidfd.
+---
+ kernel/fork.c | 12 ------------
+ 1 file changed, 12 deletions(-)
+
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 93fd6e1145a..4b3a979fc60 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1613,8 +1613,6 @@ static __latent_entropy struct task_struct *copy_process(
+ 	}
+ 
+ 	if (clone_flags & CLONE_PIDFD) {
+-		int reserved;
+-
+ 		/*
+ 		 * - CLONE_PARENT_SETTID is useless for pidfds and also
+ 		 *   parent_tidptr is used to return pidfds.
+@@ -1625,16 +1623,6 @@ static __latent_entropy struct task_struct *copy_process(
+ 		if (clone_flags &
+ 		    (CLONE_DETACHED | CLONE_PARENT_SETTID | CLONE_THREAD))
+ 			return ERR_PTR(-EINVAL);
+-
+-		/*
+-		 * Verify that parent_tidptr is sane so we can potentially
+-		 * reuse it later.
+-		 */
+-		if (get_user(reserved, parent_tidptr))
+-			return ERR_PTR(-EFAULT);
+-
+-		if (reserved != 0)
+-			return ERR_PTR(-EINVAL);
+ 	}
+ 
+ 	retval = security_task_create(clone_flags);

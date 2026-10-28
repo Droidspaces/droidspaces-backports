@@ -1,8 +1,8 @@
 # Porting to your own tree
 
-Read this when a patch rejects on your tree, or when your kernel is 4.9 or 5.4, which have
-no ready series. Everything here comes from applying the series to Google's common kernels
-and seven vendor trees, and from booting one of them.
+Read this when a patch rejects on your tree, or when your kernel is 5.4, which has no
+ready series. Everything here comes from applying the series to Google's common kernels
+and eight vendor trees, and from booting one of them.
 
 ## Start with the probe
 
@@ -14,10 +14,10 @@ tools/probe-kernel.sh <kernel dir>
 ```
 
 Each `no` is a patch you need, each `yes` a patch you skip. The pidfd lines matter most on
-4.14: Google merged its pidfd backport into android-4.14 in mid 2019, and a vendor tree
-frozen before that has none of it. Samsung's Android 9 exynos9820 kernel at 4.14.113 is
-one such tree, its Android 10 sibling at 4.14.190 is not. Every Android 4.19 kernel has
-the backport, because 4.19 shipped after it landed.
+4.9 and 4.14: Google merged its pidfd backport into android-4.9 and android-4.14 in mid
+2019, and a vendor tree frozen before that has none of it. Samsung's Android 9 exynos9820
+kernel at 4.14.113 is one such tree, its Android 10 sibling at 4.14.190 is not. Every
+Android 4.19 kernel has the backport, because 4.19 shipped after it landed.
 
 ## What each kernel version needs
 
@@ -37,23 +37,12 @@ Google's tree and applied to four vendor trees, not booted.
 [pidfd backport](../pidfd-backport-4.14/README.md) if the probe says `pidfd_open no`.
 Booted with systemd 259 and 262.
 
-**4.9.** Everything 4.14 needs, plus the 4.11 to 4.13 features that 4.9 lacks:
-
-- statx (4.11, mainline a528d35e8bfc plus the wire-up and fix commits that follow it).
-  Hard: systemd 258 removed its statx fallback and uses statx everywhere. The core commit
-  touches 72 files, most of them filesystem `getattr` signature changes. This is the real job.
-- `NS_GET_NSTYPE` (4.11, e5ff5ce6e20e). About 40 lines. Soft at boot; needed for
-  `NetworkNamespacePath=`, `PrivateUsers=` and nsresourced.
-- `TIOCGPTPEER` (4.13, 54ebbfb16034 with two fixes). Soft at boot; breaks `run0`,
-  `systemd-run -t`, `machinectl shell` and nspawn consoles.
-- `SO_PEERGROUPS` (4.13, 28b5ba2aa0f5). Soft; bus and varlink peer credentials lose group
-  information.
-- cgroup2 `nsdelegate` (4.13, 5136f6365ce3). Not needed under Droidspaces, which mounts
-  cgroup2 itself.
-
-The 4.14 patch files do not apply to 4.9 either: `arch/arm/tools/syscall.tbl` does not
-exist yet, and the pidfd backport sits at different line numbers. Treat 4.9 as a port of
-the mainline commits with 4.14 as the worked example. Nothing on 4.9 has been booted.
+**4.9.** The [4.9 series](../kernel-4.9-series/README.md), after the
+[pidfd backport](../pidfd-backport-4.9/README.md) if the probe says `pidfd_open no`. It is
+the 4.14 series ported to 4.9 context, plus a statx syscall, which 4.9 never had and
+systemd 258 no longer does without, plus the 4.11 to 4.13 features systemd uses but does
+not need to boot. cgroup2 `nsdelegate` (4.13) is left out because Droidspaces mounts
+cgroup2 itself. Compile-tested on Google's tree and two more, not booted.
 
 **Below 4.9.** Do not. statx, cgroup namespaces, ambient capabilities and the cgroup2 pids
 controller pile up, and the pidfd backport does not exist for them.
@@ -90,25 +79,27 @@ why one patch file fits every 4.14 or 4.19 tree tried so far. If you port by han
 another series, these are the places vendors differ.
 
 - **`kernel/fork.c`, `kernel/exit.c`, `kernel/signal.c`.** The Android pidfd backport is not
-  quite mainline: `pidfd_to_pid()` in signal.c also accepts a `/proc/<pid>` fd, and 4.14
-  still checks that the parent_tidptr slot is zero. Keep the backport's shape and add
-  `pidfd_pid()` and `P_PIDFD` into it.
+  quite mainline: `pidfd_to_pid()` in signal.c also accepts a `/proc/<pid>` fd, and 4.9 and
+  4.14 still check that the parent_tidptr slot is zero. Keep the backport's shape and add
+  `pidfd_pid()` and `P_PIDFD` into it. 4.9 has no `kernel_waitid()`, so the `P_PIDFD` case
+  goes into the `waitid` syscall body itself.
 - **`net/core/sock.c`.** Vendors edit `sock_setbindtodevice()`, and Google's own 4.19
   changed its capability check between stable points. Give `SO_BINDTOIFINDEX` its own
   helper and leave that function alone.
 - **`include/uapi/asm-generic/socket.h`.** Put `SO_BINDTOIFINDEX 62` between
   `SO_PEERGROUPS` and `SO_ZEROCOPY`, with nothing after `SO_ZEROCOPY` in the context.
-  Samsung appends KNOX options there, Google has `SO_TXTIME` there on 4.19. The per-arch
-  copies need the arch-specific values from the mainline commit.
+  Samsung appends KNOX options there, Google has `SO_TXTIME` there on 4.19. On 4.9 the last
+  option is `SO_COOKIE`, so anchor on `SO_CNX_ADVICE` above it instead. The per-arch copies
+  need the arch-specific values from the mainline commit.
 - **Syscall tables.** Add 436 and 439 to `include/uapi/asm-generic/unistd.h`,
-  `arch/arm64/include/asm/unistd32.h`, `arch/arm/tools/syscall.tbl` and the x86 tables,
-  right after `pidfd_open` (434), and raise `__NR_syscalls` and `__NR_compat_syscalls` to
-  440. 437 and 438 stay unused. These one-liners are what rejects on a tree that already
+  `arch/arm64/include/asm/unistd32.h`, `arch/arm/tools/syscall.tbl` (on 4.9 still
+  `arch/arm/kernel/calls.S`) and the x86 tables, right after `pidfd_open` (434), and raise
+  `__NR_syscalls` and `__NR_compat_syscalls` to 440. 437 and 438 stay unused. These one-liners are what rejects on a tree that already
   backported other syscalls, such as Samsung's Android 13 and 14 kernels. Add the rows by
   hand and leave the counts alone if they are already 440 or more. Keep the x86 rows in a
   patch of their own; vendor x86 tables differ and nobody builds them.
 - **`fs/open.c`.** The credential override block inside `faccessat` differs between
-  vendors: the `non_rcu` change arrived in 4.14.139 and 4.19.69, Qualcomm adds sdcardfs
+  vendors: the `non_rcu` change arrived in 4.9.190, 4.14.139 and 4.19.69, Qualcomm adds sdcardfs
   lines, KernelSU hooks sit above or inside the function. Do not touch that block. Add the
   flags argument, the flag checks, and `if (flags & AT_EACCESS) goto retry;` so the override
   is skipped with `old_cred` left NULL, then make the `out:` label conditional on
@@ -120,12 +111,19 @@ another series, these are the places vendors differ.
 - **`include/uapi/linux/fcntl.h`.** `AT_REMOVEDIR` has a two-line comment. Put the
   `AT_EACCESS` block after it, before `AT_SYMLINK_FOLLOW`, not inside the comment. Getting
   this wrong fails every file that includes fcntl.h.
-- **`fs/file.c`.** 4.14's `__close_fd()` still clears the close-on-exec bit itself, so keep
-  that line in `pick_file()`. 4.19's does not. Neither has `__close_fd_get_file()`, which
+- **`fs/file.c`.** 4.9's and 4.14's `__close_fd()` still clear the close-on-exec bit
+  themselves, so keep that line in `pick_file()`. 4.19's does not. Neither has `__close_fd_get_file()`, which
   mainline's hunk context carries from the io_uring work.
 - **`security/selinux/nlmsgtab.c`.** Any change to `RTM_MAX` needs matching rows and a moved
   `BUILD_BUG_ON`, or the build fails at link time under LTO with an undefined
   `__compiletime_assert_NNN`.
+- **statx on 4.9.** Do not port the mainline statx commit. It changes every filesystem's
+  `getattr()` and vendor filesystems would all need the same edit. Patch 4 of the
+  [4.9 series](../kernel-4.9-series/README.md) implements the syscall on top of
+  `vfs_getattr()` instead, in one file.
+- **TIOCGPTPEER on 4.9.** Squash the three mainline commits into their v4.13 end state. The
+  first one's `struct path` caching leaks and the third reverts it. 4.9's `tty_ioctl()`
+  switch has no `default:` case, so the new case goes at the end of the switch.
 
 ## Trees these patches were applied to
 
@@ -144,7 +142,11 @@ Google trees also had their touched objects compiled.
 - Google Pixel 4a 5G and 5, `LineageOS/android_kernel_google_redbull`, 4.19.325.
 - Samsung Galaxy S20, `LineageOS/android_kernel_samsung_universal9830`, 4.19.325, with
   four syscall table lines by hand.
+- Google `android-4.9-q`, 4.9.337.
+- Samsung Galaxy A01, `Kernels-by-ravindu644/samsung_kernel_a015f`, 4.9.227.
+- Google `android-4.9-p-release`, 4.9.118, and `android-4.9-p`, 4.9.299, both after the
+  pidfd backport.
 
-The series READMEs say per tree which patches applied and what, if anything, was skipped.
-4.9 and 5.4 only had the probe run and an apply check that showed the patch files need
-re-porting there.
+The series READMEs say per tree which patches applied, which compiled, and what, if
+anything, was skipped. 5.4 only had the probe run and an apply check that showed the patch
+files need re-porting there.

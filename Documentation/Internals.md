@@ -34,7 +34,9 @@ systemd 260 still lists these and 4.14 ships them: timerfd `CLOCK_BOOTTIME` (3.1
 `memfd_create` and `getrandom` (3.17), ambient capabilities (4.3), the pids controller in
 cgroup v2 (4.5), cgroup namespaces (4.6), statx (4.11, without the mount id field that
 comes later), the nsfs `NS_GET_NSTYPE` ioctl (4.11), `TIOCGPTPEER` (4.13), the cgroup2
-`nsdelegate` mount option (4.13) and cgroup2 threaded mode (4.14).
+`nsdelegate` mount option (4.13) and cgroup2 threaded mode (4.14). 4.9 lacks statx, the
+nsfs ioctl, `TIOCGPTPEER`, `SO_PEERGROUPS` and `nsdelegate`; the
+[4.9 series](../kernel-4.9-series/README.md) adds all but the last.
 
 ## Hard requirements for systemd 258 and 259
 

@@ -1,0 +1,91 @@
+From a3660e0f1aee75b24dbf3a2cb34c0031b8cb2563 Mon Sep 17 00:00:00 2001
+From: Arnd Bergmann <arnd@arndb.de>
+Date: Thu, 28 Feb 2019 13:59:19 +0100
+Subject: [PATCH] BACKPORT: arch: add pidfd and io_uring syscalls everywhere
+
+Add the io_uring and pidfd_send_signal system calls to all architectures.
+
+These system calls are designed to handle both native and compat tasks,
+so all entries are the same across architectures, only arm-compat and
+the generic tale still use an old format.
+
+Acked-by: Michael Ellerman <mpe@ellerman.id.au> (powerpc)
+Acked-by: Heiko Carstens <heiko.carstens@de.ibm.com> (s390)
+Acked-by: Geert Uytterhoeven <geert@linux-m68k.org>
+Signed-off-by: Arnd Bergmann <arnd@arndb.de>
+
+(cherry picked from commit 39036cd2727395c3369b1051005da74059a85317)
+
+Conflicts:
+
+        arch/alpha/kernel/syscalls/syscall.tbl
+        arch/arm/tools/syscall.tbl
+        arch/arm64/include/asm/unistd.h
+        arch/arm64/include/asm/unistd32.h
+        arch/ia64/kernel/syscalls/syscall.tbl
+        arch/m68k/kernel/syscalls/syscall.tbl
+        arch/microblaze/kernel/syscalls/syscall.tbl
+        arch/mips/kernel/syscalls/syscall_n32.tbl
+        arch/mips/kernel/syscalls/syscall_n64.tbl
+        arch/mips/kernel/syscalls/syscall_o32.tbl
+        arch/parisc/kernel/syscalls/syscall.tbl
+        arch/powerpc/kernel/syscalls/syscall.tbl
+        arch/s390/kernel/syscalls/syscall.tbl
+        arch/sh/kernel/syscalls/syscall.tbl
+        arch/sparc/kernel/syscalls/syscall.tbl
+        arch/xtensa/kernel/syscalls/syscall.tbl
+        arch/arm/include/uapi/asm/unistd.h
+        arch/arm/kernel/calls.S
+
+(1. Skipped syscall.tbl modifications for missing architectures.
+ 2. Skipped io_uring syscall additions
+ 3. Added __NR_pidfd_send_signal into arch/arm/include/uapi/asm/unistd.h
+ 4. Added CALL(sys_pidfd_send_signal) into arch/arm/kernel/calls.S)
+
+Bug: 135608568
+Test: make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf-
+Change-Id: Ica9acfaee5602f26e8b1cea431b6fe6d53bf9cf9
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ arch/arm/include/uapi/asm/unistd.h | 1 +
+ arch/arm/kernel/calls.S            | 1 +
+ arch/arm64/include/asm/unistd32.h  | 2 ++
+ 3 files changed, 4 insertions(+)
+
+diff --git a/arch/arm/include/uapi/asm/unistd.h b/arch/arm/include/uapi/asm/unistd.h
+index 7b8bf93c224..d67def5796e 100644
+--- a/arch/arm/include/uapi/asm/unistd.h
++++ b/arch/arm/include/uapi/asm/unistd.h
+@@ -423,6 +423,7 @@
+ #define __NR_pkey_mprotect		(__NR_SYSCALL_BASE+394)
+ #define __NR_pkey_alloc			(__NR_SYSCALL_BASE+395)
+ #define __NR_pkey_free			(__NR_SYSCALL_BASE+396)
++#define __NR_pidfd_send_signal		(__NR_SYSCALL_BASE+424)
+ #define __NR_pidfd_open		(__NR_SYSCALL_BASE+434)
+ 
+ /*
+diff --git a/arch/arm/kernel/calls.S b/arch/arm/kernel/calls.S
+index fa6e4dbb369..4585cdf35e8 100644
+--- a/arch/arm/kernel/calls.S
++++ b/arch/arm/kernel/calls.S
+@@ -406,6 +406,7 @@
+ 		CALL(sys_pkey_mprotect)
+ /* 395 */	CALL(sys_pkey_alloc)
+ 		CALL(sys_pkey_free)
++		CALL(sys_pidfd_send_signal)
+ 		CALL(sys_pidfd_open)
+ #ifndef syscalls_counted
+ .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index 0c04b767550..491a1914e83 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -809,6 +809,8 @@ __SYSCALL(__NR_copy_file_range, sys_copy_file_range)
+ __SYSCALL(__NR_preadv2, compat_sys_preadv2)
+ #define __NR_pwritev2 393
+ __SYSCALL(__NR_pwritev2, compat_sys_pwritev2)
++#define __NR_pidfd_send_signal 424
++__SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
+ 

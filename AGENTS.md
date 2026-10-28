@@ -5,14 +5,15 @@ anything. `CLAUDE.md` is a symlink to this file.
 
 ## What this is
 
-Kernel patches that let a Droidspaces guest boot systemd 258 through 262 on an Android 4.14
-or 4.19 kernel, and the documents that explain them. There is no build system, no CI, no
+Kernel patches that let a Droidspaces guest boot systemd 258 through 262 on an Android 4.9,
+4.14 or 4.19 kernel, and the documents that explain them. There is no build system, no CI, no
 test suite and no code of its own apart from one shell script. The content is:
 
-- `kernel-4.14-series/`, `kernel-4.19-series/`: ten `git format-patch` files each, plus a
-  README that lists them.
-- `pidfd-backport-4.14/`: Google's twelve-patch pidfd backport for 4.14 trees that never
-  got it, plus a README.
+- `kernel-4.9-series/`, `kernel-4.14-series/`, `kernel-4.19-series/`: the `git
+  format-patch` files for one kernel version each, plus a README that lists them.
+- `pidfd-backport-4.9/`, `pidfd-backport-4.14/`: Google's pidfd backport for trees that
+  never got it, plus a README. The 4.9 one carries two alternate patches for 4.9.1xx trees
+  under `alt-4.9.1xx/`.
 - `Documentation/`: `Porting.md`, `Boot-Log.md`, `Internals.md`, and the two screenshots
   under `resources/`.
 - `tools/probe-kernel.sh`: prints `yes` or `no` for every feature the patches add.
@@ -36,7 +37,8 @@ The repository is small on purpose. Do not grow it.
   flag when the default behaviour already covers the case.
 - No new documentation page unless an existing page has no section where the content
   fits. Four pages is already a lot for a patch set. Prefer a paragraph in the right place
-  over a new file.
+  over a new file. A new series gets a directory with a README in the shape of the existing
+  ones and one paragraph per existing page, not a page of its own.
 - Do not rename or renumber anything. Patch numbers are cited in every README and in
   `Boot-Log.md`. A renumbering is a change to six files for no gain.
 - Do not reorganise the directory layout. It was settled once, and the README explains it.
@@ -65,8 +67,9 @@ and compiled. Treat it as a build artifact, not a source file.
   that line, a short paragraph starting `Backport to 4.14:` or `Backport to 4.19:` says
   what was changed and why, and a `Conflicts:` line names the files that needed hand
   placement. Nothing else goes into the body.
-- The one original patch, the nexthop stub, keeps its own author and explains the
-  problem it solves in its body. Do not rewrite it into a cherry-pick.
+- The original patches, the nexthop stub in every series and the reduced statx on 4.9,
+  keep their own author and explain the problem they solve in their body. Do not rewrite
+  them into cherry-picks.
 - A patch adds one feature. Do not merge two patches because they touch the same file,
   and do not split one because it is large. The README's "skip if the probe says yes"
   logic depends on one feature per patch.
@@ -177,7 +180,7 @@ findings, as in the boot log page, and nothing else.
   Prefixes, matching the history:
   - `docs:` for anything under `Documentation/` or a README
   - `probe:` for `tools/probe-kernel.sh`
-  - `4.14:`, `4.19:`, `pidfd:` for a change to a patch in that directory
+  - `4.9:`, `4.14:`, `4.19:`, `pidfd:` for a change to a patch in that directory
   - `fix:` only when the commit corrects something that was wrong, and say what was wrong
 - The body says what was wrong, what changed, and on which tree it was checked. It does
   not list the files, git does that.
@@ -190,6 +193,6 @@ findings, as in the boot log page, and nothing else.
   were read from systemd's history. A new claim about what systemd needs gets a commit
   hash from systemd's tree next to it, or it does not go in.
 - The new mount API is handled by Droidspaces, not by a kernel patch. The reasoning is in
-  `Internals.md`. Do not add a mount API backport to either series.
+  `Internals.md`. Do not add a mount API backport to any series.
 - The boot in the screenshots was on 2026-10-28 on a Galaxy S10, kernel 4.14.356, Fedora 44
   with systemd 259 and Arch Linux ARM with systemd 262. Do not change these captions.

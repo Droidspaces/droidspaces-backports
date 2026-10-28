@@ -1,0 +1,69 @@
+From bc9d5db153f6ecb26346e02347e40831428dcc27 Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Wed, 28 Oct 2026 16:35:44 +0000
+Subject: [PATCH 08/14] arch: wire-up close_range()
+
+This wires up the close_range() syscall into all arches at once.
+
+Suggested-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Christian Brauner <christian.brauner@ubuntu.com>
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Acked-by: Arnd Bergmann <arnd@arndb.de>
+Acked-by: Michael Ellerman <mpe@ellerman.id.au> (powerpc)
+Cc: Jann Horn <jannh@google.com>
+Cc: David Howells <dhowells@redhat.com>
+Cc: Dmitry V. Levin <ldv@altlinux.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Florian Weimer <fweimer@redhat.com>
+Cc: linux-api@vger.kernel.org
+Cc: linux-alpha@vger.kernel.org
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-ia64@vger.kernel.org
+Cc: linux-m68k@lists.linux-m68k.org
+Cc: linux-mips@vger.kernel.org
+Cc: linux-parisc@vger.kernel.org
+Cc: linuxppc-dev@lists.ozlabs.org
+Cc: linux-s390@vger.kernel.org
+Cc: linux-sh@vger.kernel.org
+Cc: sparclinux@vger.kernel.org
+Cc: linux-xtensa@linux-xtensa.org
+Cc: linux-arch@vger.kernel.org
+Cc: x86@kernel.org
+(cherry picked from commit 9b4feb630e8e9801603f3cab3a1804433ea5c21b)
+
+Backport to 4.9: only the asm-generic and arm64 compat tables are wired here,
+matching what this tree carries for pidfd_open(); x86 and 32-bit ARM are in a
+separate patch. __NR_syscalls and __NR_compat_syscalls were already raised to
+440 by the faccessat2 patch.
+---
+ arch/arm64/include/asm/unistd32.h | 2 ++
+ include/uapi/asm-generic/unistd.h | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index c3857150386..febf9180bdb 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -815,6 +815,8 @@ __SYSCALL(__NR_statx, sys_statx)
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
++#define __NR_close_range 436
++__SYSCALL(__NR_close_range, sys_close_range)
+ #define __NR_faccessat2 439
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ 
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index b213810315a..21afa01e544 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -736,6 +736,8 @@ __SYSCALL(__NR_statx,     sys_statx)
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
++#define __NR_close_range 436
++__SYSCALL(__NR_close_range, sys_close_range)
+ #define __NR_faccessat2 439
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ 

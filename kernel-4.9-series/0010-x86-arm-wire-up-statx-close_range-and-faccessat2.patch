@@ -1,0 +1,107 @@
+From e12b8be4769079f48fc5560d32d234509fbee286 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 16:39:23 +0000
+Subject: [PATCH 10/14] x86, arm: wire up statx, close_range and faccessat2
+
+The x86 tables and the 32-bit ARM table (arch/arm/kernel/calls.S, this
+tree predates arch/arm/tools/syscall.tbl) get the same numbers mainline
+uses: statx 332 (x86_64) / 383 (i386) / 397 (ARM), close_range 436 and
+faccessat2 439 everywhere. 4.9's calls.S already reserved 397 "for
+sys_statx"; 435, 437 and 438 are reserved for clone3, openat2 and
+pidfd_getfd, which this kernel does not have.
+
+Separate from the main patches because the arm64 vendor trees this series
+is meant for do not all carry these tables (the Samsung sm_a015f tree has
+no arch/arm/kernel/calls.S) and the Qualcomm ones have their own x86
+backports. Skip this patch on such a tree.
+---
+ arch/arm/include/asm/unistd.h          | 2 +-
+ arch/arm/include/uapi/asm/unistd.h     | 3 +++
+ arch/arm/kernel/calls.S                | 7 ++++++-
+ arch/x86/entry/syscalls/syscall_32.tbl | 3 +++
+ arch/x86/entry/syscalls/syscall_64.tbl | 3 +++
+ 5 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/include/asm/unistd.h b/arch/arm/include/asm/unistd.h
+index 30dc381ecac..cb57582a51a 100644
+--- a/arch/arm/include/asm/unistd.h
++++ b/arch/arm/include/asm/unistd.h
+@@ -19,7 +19,7 @@
+  * This may need to be greater than __NR_last_syscall+1 in order to
+  * account for the padding in the syscall table
+  */
+-#define __NR_syscalls  (436)
++#define __NR_syscalls  (440)
+ 
+ #define __ARCH_WANT_STAT64
+ #define __ARCH_WANT_SYS_GETHOSTNAME
+diff --git a/arch/arm/include/uapi/asm/unistd.h b/arch/arm/include/uapi/asm/unistd.h
+index d67def5796e..9d439482853 100644
+--- a/arch/arm/include/uapi/asm/unistd.h
++++ b/arch/arm/include/uapi/asm/unistd.h
+@@ -423,8 +423,11 @@
+ #define __NR_pkey_mprotect		(__NR_SYSCALL_BASE+394)
+ #define __NR_pkey_alloc			(__NR_SYSCALL_BASE+395)
+ #define __NR_pkey_free			(__NR_SYSCALL_BASE+396)
++#define __NR_statx			(__NR_SYSCALL_BASE+397)
+ #define __NR_pidfd_send_signal		(__NR_SYSCALL_BASE+424)
+ #define __NR_pidfd_open		(__NR_SYSCALL_BASE+434)
++#define __NR_close_range		(__NR_SYSCALL_BASE+436)
++#define __NR_faccessat2		(__NR_SYSCALL_BASE+439)
+ 
+ /*
+  * The following SWIs are ARM private.
+diff --git a/arch/arm/kernel/calls.S b/arch/arm/kernel/calls.S
+index 03977a3092d..1d9d8b148ec 100644
+--- a/arch/arm/kernel/calls.S
++++ b/arch/arm/kernel/calls.S
+@@ -406,7 +406,7 @@
+ 		CALL(sys_pkey_mprotect)
+ /* 395 */	CALL(sys_pkey_alloc)
+ 		CALL(sys_pkey_free)
+-		CALL(sys_ni_syscall)	/* for sys_statx */
++		CALL(sys_statx)
+ 		CALL(sys_ni_syscall)	/* for sys_rseq */
+ 		CALL(sys_ni_syscall)	/* for sys_io_pgetevents_time32 */
+ /* 400 */	CALL(sys_ni_syscall)	/* for sys_migrate_pages */
+@@ -444,6 +444,11 @@
+ 		CALL(sys_ni_syscall)	/* for sys_fsmount */
+ 		CALL(sys_ni_syscall)	/* for sys_fspick */
+ 		CALL(sys_pidfd_open)
++/* 435 */	CALL(sys_ni_syscall)	/* for sys_clone3 */
++		CALL(sys_close_range)
++		CALL(sys_ni_syscall)	/* for sys_openat2 */
++		CALL(sys_ni_syscall)	/* for sys_pidfd_getfd */
++		CALL(sys_faccessat2)
+ #ifndef syscalls_counted
+ .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
+ #define syscalls_counted
+diff --git a/arch/x86/entry/syscalls/syscall_32.tbl b/arch/x86/entry/syscalls/syscall_32.tbl
+index d2e3f29a483..5e563327951 100644
+--- a/arch/x86/entry/syscalls/syscall_32.tbl
++++ b/arch/x86/entry/syscalls/syscall_32.tbl
+@@ -389,5 +389,8 @@
+ 380	i386	pkey_mprotect		sys_pkey_mprotect
+ 381	i386	pkey_alloc		sys_pkey_alloc
+ 382	i386	pkey_free		sys_pkey_free
++383	i386	statx			sys_statx
+ 424	i386	pidfd_send_signal	sys_pidfd_send_signal
+ 434	i386	pidfd_open		sys_pidfd_open
++436	i386	close_range		sys_close_range
++439	i386	faccessat2		sys_faccessat2
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index db0315d6667..69fdd62c333 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -338,8 +338,11 @@
+ 329	common	pkey_mprotect		sys_pkey_mprotect
+ 330	common	pkey_alloc		sys_pkey_alloc
+ 331	common	pkey_free		sys_pkey_free
++332	common	statx			sys_statx
+ 424	common	pidfd_send_signal	sys_pidfd_send_signal
+ 434	common	pidfd_open		sys_pidfd_open
++436	common	close_range		sys_close_range
++439	common	faccessat2		sys_faccessat2
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact

@@ -1,0 +1,366 @@
+From 28d38500bf7ba17e8c3ade38162130162f40fc0f Mon Sep 17 00:00:00 2001
+From: Aleksa Sarai <asarai@suse.de>
+Date: Wed, 28 Oct 2026 16:43:12 +0000
+Subject: [PATCH 14/14] tty: add TIOCGPTPEER ioctl
+
+When opening the slave end of a PTY, it is currently necessary for
+userspace to derive the slave's pathname (/dev/pts/N) from the master
+fd, open it and hope that it refers to the same PTY. Inside a mount
+namespace that does not share the devpts instance with the one the
+master was taken from, or when /dev/pts is not mounted at all, this
+is not possible, and even where it is possible it is a race against
+the PTY being closed and the number reused.
+
+This adds the TIOCGPTPEER ioctl, which opens the slave end of the PTY
+the master fd refers to and returns an fd to it, with the open flags
+given as the argument.
+
+This is the final v4.13 form of the feature, squashed from three
+mainline commits:
+
+  54ebbfb16034 "tty: add TIOCGPTPEER ioctl" (Aleksa Sarai)
+  c6325179238f "tty: Fix TIOCGPTPEER ioctl definition" (Gleb Fotengauer-Malinovskiy)
+  311fc65c9fb9 "pty: Repair TIOCGPTPEER" (Eric W. Biederman)
+
+The first two together define TIOCGPTPEER as _IO('T', 0x41)
+(0x5441) in the generic and per-architecture ioctls headers. The third
+replaced the cached struct path in tty->link->driver_data, which leaked
+and could point into the wrong devpts instance, with ptm_open_peer():
+it recomputes the slave's path from the ptmx file at ioctl time through
+the new devpts_mntget(), and the ioctl is handled in tty_ioctl() because
+it needs the struct file.
+
+Backport to 4.9: the 4.9 tty_ioctl() switch has no default case (that
+came with tty_jobctrl.c in v4.12), so the new case sits after
+TIOCSSERIAL at the end of the switch. ptm_open_peer() lives next to
+ptmx_cdev under CONFIG_UNIX98_PTYS as in mainline; the pty_close(),
+ptmx_open() and pty_unix98_ioctl() changes of the first commit are
+reverted by the third and are not included. The TIOCGPTPEER define
+sits after TIOCVHANGUP rather than after TIOCGEXCL so the hunk does not
+depend on what a vendor tree appends after TIOCGEXCL (Samsung adds
+TIOCPMGET and friends there).
+
+systemd 258 removed its fallback for kernels without this ioctl (commit
+1d522f1a8); run0, systemd-run -t, machinectl shell and nspawn consoles
+fail without it. It is not needed to boot.
+---
+ arch/alpha/include/uapi/asm/ioctls.h   |  1 +
+ arch/mips/include/uapi/asm/ioctls.h    |  1 +
+ arch/parisc/include/uapi/asm/ioctls.h  |  1 +
+ arch/powerpc/include/uapi/asm/ioctls.h |  1 +
+ arch/sh/include/uapi/asm/ioctls.h      |  1 +
+ arch/sparc/include/uapi/asm/ioctls.h   |  3 +-
+ arch/xtensa/include/uapi/asm/ioctls.h  |  1 +
+ drivers/tty/pty.c                      | 53 +++++++++++++++++++++
+ drivers/tty/tty_io.c                   |  3 ++
+ fs/devpts/inode.c                      | 65 +++++++++++++++++++-------
+ include/linux/devpts_fs.h              | 10 ++++
+ include/uapi/asm-generic/ioctls.h      |  1 +
+ 12 files changed, 124 insertions(+), 17 deletions(-)
+
+diff --git a/arch/alpha/include/uapi/asm/ioctls.h b/arch/alpha/include/uapi/asm/ioctls.h
+index 7ee8ab577e1..e9e861dc59b 100644
+--- a/arch/alpha/include/uapi/asm/ioctls.h
++++ b/arch/alpha/include/uapi/asm/ioctls.h
+@@ -105,6 +105,7 @@
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ 
+ #define TIOCSERCONFIG	0x5453
+ #define TIOCSERGWILD	0x5454
+diff --git a/arch/mips/include/uapi/asm/ioctls.h b/arch/mips/include/uapi/asm/ioctls.h
+index 740219c2c89..1609cb0907a 100644
+--- a/arch/mips/include/uapi/asm/ioctls.h
++++ b/arch/mips/include/uapi/asm/ioctls.h
+@@ -91,6 +91,7 @@
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ 
+ /* I hope the range from 0x5480 on is free ... */
+ #define TIOCSCTTY	0x5480		/* become controlling tty */
+diff --git a/arch/parisc/include/uapi/asm/ioctls.h b/arch/parisc/include/uapi/asm/ioctls.h
+index b6572f051b6..d0e3321403b 100644
+--- a/arch/parisc/include/uapi/asm/ioctls.h
++++ b/arch/parisc/include/uapi/asm/ioctls.h
+@@ -60,6 +60,7 @@
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ 
+ #define FIONCLEX	0x5450  /* these numbers need to be adjusted. */
+ #define FIOCLEX		0x5451
+diff --git a/arch/powerpc/include/uapi/asm/ioctls.h b/arch/powerpc/include/uapi/asm/ioctls.h
+index 49a25796a61..e3b10469f78 100644
+--- a/arch/powerpc/include/uapi/asm/ioctls.h
++++ b/arch/powerpc/include/uapi/asm/ioctls.h
+@@ -100,6 +100,7 @@
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ 
+ #define TIOCSERCONFIG	0x5453
+ #define TIOCSERGWILD	0x5454
+diff --git a/arch/sh/include/uapi/asm/ioctls.h b/arch/sh/include/uapi/asm/ioctls.h
+index c9903e56ccf..787bac9f67d 100644
+--- a/arch/sh/include/uapi/asm/ioctls.h
++++ b/arch/sh/include/uapi/asm/ioctls.h
+@@ -93,6 +93,7 @@
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ 
+ #define TIOCSERCONFIG	_IO('T', 83) /* 0x5453 */
+ #define TIOCSERGWILD	_IOR('T', 84,  int) /* 0x5454 */
+diff --git a/arch/sparc/include/uapi/asm/ioctls.h b/arch/sparc/include/uapi/asm/ioctls.h
+index 06b3f6c3bb9..f5df72b93bb 100644
+--- a/arch/sparc/include/uapi/asm/ioctls.h
++++ b/arch/sparc/include/uapi/asm/ioctls.h
+@@ -27,7 +27,7 @@
+ #define TIOCGRS485	_IOR('T', 0x41, struct serial_rs485)
+ #define TIOCSRS485	_IOWR('T', 0x42, struct serial_rs485)
+ 
+-/* Note that all the ioctls that are not available in Linux have a 
++/* Note that all the ioctls that are not available in Linux have a
+  * double underscore on the front to: a) avoid some programs to
+  * think we support some ioctls under Linux (autoconfiguration stuff)
+  */
+@@ -88,6 +88,7 @@
+ #define TIOCGPTN	_IOR('t', 134, unsigned int) /* Get Pty Number */
+ #define TIOCSPTLCK	_IOW('t', 135, int) /* Lock/unlock PTY */
+ #define TIOCSIG		_IOW('t', 136, int) /* Generate signal on Pty slave */
++#define TIOCGPTPEER	_IO('t', 137) /* Safely open the slave */
+ 
+ /* Little f */
+ #define FIOCLEX		_IO('f', 1)
+diff --git a/arch/xtensa/include/uapi/asm/ioctls.h b/arch/xtensa/include/uapi/asm/ioctls.h
+index 518954e74e6..47d82c09be7 100644
+--- a/arch/xtensa/include/uapi/asm/ioctls.h
++++ b/arch/xtensa/include/uapi/asm/ioctls.h
+@@ -105,6 +105,7 @@
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ 
+ #define TIOCSERCONFIG	_IO('T', 83)
+ #define TIOCSERGWILD	_IOR('T', 84,  int)
+diff --git a/drivers/tty/pty.c b/drivers/tty/pty.c
+index f13f2535cc8..3413a37c927 100644
+--- a/drivers/tty/pty.c
++++ b/drivers/tty/pty.c
+@@ -24,6 +24,9 @@
+ #include <linux/slab.h>
+ #include <linux/mutex.h>
+ #include <linux/poll.h>
++#include <linux/mount.h>
++#include <linux/file.h>
++#include <linux/ioctl.h>
+ 
+ #undef TTY_DEBUG_HANGUP
+ #ifdef TTY_DEBUG_HANGUP
+@@ -581,6 +584,56 @@ static inline void legacy_pty_init(void) { }
+ 
+ static struct cdev ptmx_cdev;
+ 
++/**
++ *	ptm_open_peer - open the peer of a pty
++ *	@master: the open struct file of the ptmx device node
++ *	@tty: the master of the pty being opened
++ *	@flags: the flags for open
++ *
++ *	Provide a race free way for userspace to open the slave end of a pty
++ *	(where they have the master fd and cannot access or trust the mount
++ *	namespace /dev/pts was mounted inside).
++ */
++int ptm_open_peer(struct file *master, struct tty_struct *tty, int flags)
++{
++	int fd = -1;
++	struct file *filp;
++	int retval = -EINVAL;
++	struct path path;
++
++	if (tty->driver != ptm_driver)
++		return -EIO;
++
++	fd = get_unused_fd_flags(0);
++	if (fd < 0) {
++		retval = fd;
++		goto err;
++	}
++
++	/* Compute the slave's path */
++	path.mnt = devpts_mntget(master, tty->driver_data);
++	if (IS_ERR(path.mnt)) {
++		retval = PTR_ERR(path.mnt);
++		goto err_put;
++	}
++	path.dentry = tty->link->driver_data;
++
++	filp = dentry_open(&path, flags, current_cred());
++	mntput(path.mnt);
++	if (IS_ERR(filp)) {
++		retval = PTR_ERR(filp);
++		goto err_put;
++	}
++
++	fd_install(fd, filp);
++	return fd;
++
++err_put:
++	put_unused_fd(fd);
++err:
++	return retval;
++}
++
+ static int pty_unix98_ioctl(struct tty_struct *tty,
+ 			    unsigned int cmd, unsigned long arg)
+ {
+diff --git a/drivers/tty/tty_io.c b/drivers/tty/tty_io.c
+index f755bfbe0f3..74ef5331842 100644
+--- a/drivers/tty/tty_io.c
++++ b/drivers/tty/tty_io.c
+@@ -3029,6 +3029,9 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ 	case TIOCSSERIAL:
+ 		tty_warn_deprecated_flags(p);
+ 		break;
++	case TIOCGPTPEER:
++		/* Special because the struct file is needed */
++		return ptm_open_peer(file, tty, (int)arg);
+ 	}
+ 	if (tty->ops->ioctl) {
+ 		retval = tty->ops->ioctl(tty, cmd, arg);
+diff --git a/fs/devpts/inode.c b/fs/devpts/inode.c
+index 81be3ba17cb..464529ce530 100644
+--- a/fs/devpts/inode.c
++++ b/fs/devpts/inode.c
+@@ -133,6 +133,50 @@ static inline struct pts_fs_info *DEVPTS_SB(struct super_block *sb)
+ 	return sb->s_fs_info;
+ }
+ 
++static int devpts_ptmx_path(struct path *path)
++{
++	struct super_block *sb;
++	int err;
++
++	/* Has the devpts filesystem already been found? */
++	if (path->mnt->mnt_sb->s_magic == DEVPTS_SUPER_MAGIC)
++		return 0;
++
++	/* Is a devpts filesystem at "pts" in the same directory? */
++	err = path_pts(path);
++	if (err)
++		return err;
++
++	/* Is the path the root of a devpts filesystem? */
++	sb = path->mnt->mnt_sb;
++	if ((sb->s_magic != DEVPTS_SUPER_MAGIC) ||
++	    (path->mnt->mnt_root != sb->s_root))
++		return -ENODEV;
++
++	return 0;
++}
++
++struct vfsmount *devpts_mntget(struct file *filp, struct pts_fs_info *fsi)
++{
++	struct path path;
++	int err;
++
++	path = filp->f_path;
++	path_get(&path);
++
++	err = devpts_ptmx_path(&path);
++	dput(path.dentry);
++	if (err) {
++		mntput(path.mnt);
++		path.mnt = ERR_PTR(err);
++	}
++	if (DEVPTS_SB(path.mnt->mnt_sb) != fsi) {
++		mntput(path.mnt);
++		path.mnt = ERR_PTR(-ENODEV);
++	}
++	return path.mnt;
++}
++
+ struct pts_fs_info *devpts_acquire(struct file *filp)
+ {
+ 	struct pts_fs_info *result;
+@@ -143,27 +187,16 @@ struct pts_fs_info *devpts_acquire(struct file *filp)
+ 	path = filp->f_path;
+ 	path_get(&path);
+ 
+-	/* Has the devpts filesystem already been found? */
+-	sb = path.mnt->mnt_sb;
+-	if (sb->s_magic != DEVPTS_SUPER_MAGIC) {
+-		/* Is a devpts filesystem at "pts" in the same directory? */
+-		err = path_pts(&path);
+-		if (err) {
+-			result = ERR_PTR(err);
+-			goto out;
+-		}
+-
+-		/* Is the path the root of a devpts filesystem? */
+-		result = ERR_PTR(-ENODEV);
+-		sb = path.mnt->mnt_sb;
+-		if ((sb->s_magic != DEVPTS_SUPER_MAGIC) ||
+-		    (path.mnt->mnt_root != sb->s_root))
+-			goto out;
++	err = devpts_ptmx_path(&path);
++	if (err) {
++		result = ERR_PTR(err);
++		goto out;
+ 	}
+ 
+ 	/*
+ 	 * pty code needs to hold extra references in case of last /dev/tty close
+ 	 */
++	sb = path.mnt->mnt_sb;
+ 	atomic_inc(&sb->s_active);
+ 	result = DEVPTS_SB(sb);
+ 
+diff --git a/include/linux/devpts_fs.h b/include/linux/devpts_fs.h
+index 277ab9af9ac..100cb434376 100644
+--- a/include/linux/devpts_fs.h
++++ b/include/linux/devpts_fs.h
+@@ -19,6 +19,7 @@
+ 
+ struct pts_fs_info;
+ 
++struct vfsmount *devpts_mntget(struct file *, struct pts_fs_info *);
+ struct pts_fs_info *devpts_acquire(struct file *);
+ void devpts_release(struct pts_fs_info *);
+ 
+@@ -32,6 +33,15 @@ void *devpts_get_priv(struct dentry *);
+ /* unlink */
+ void devpts_pty_kill(struct dentry *);
+ 
++/* in pty.c */
++int ptm_open_peer(struct file *master, struct tty_struct *tty, int flags);
++
++#else
++static inline int
++ptm_open_peer(struct file *master, struct tty_struct *tty, int flags)
++{
++	return -EIO;
++}
+ #endif
+ 
+ 
+diff --git a/include/uapi/asm-generic/ioctls.h b/include/uapi/asm-generic/ioctls.h
+index 143dacbb7d9..82ee2215ceb 100644
+--- a/include/uapi/asm-generic/ioctls.h
++++ b/include/uapi/asm-generic/ioctls.h
+@@ -74,6 +74,7 @@
+ #define TCSETXW		0x5435
+ #define TIOCSIG		_IOW('T', 0x36, int)  /* pty: generate signal */
+ #define TIOCVHANGUP	0x5437
++#define TIOCGPTPEER	_IO('T', 0x41) /* Safely open the slave */
+ #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
+ #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
+ #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */

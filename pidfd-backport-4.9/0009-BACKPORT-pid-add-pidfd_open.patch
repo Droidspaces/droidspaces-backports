@@ -1,0 +1,165 @@
+From 304e7f38acb48dfc30cfaa9e6d64148ec3b46ac7 Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian@brauner.io>
+Date: Fri, 24 May 2019 12:43:51 +0200
+Subject: [PATCH] BACKPORT: pid: add pidfd_open()
+
+This adds the pidfd_open() syscall. It allows a caller to retrieve pollable
+pidfds for a process which did not get created via CLONE_PIDFD, i.e. for a
+process that is created via traditional fork()/clone() calls that is only
+referenced by a PID:
+
+int pidfd = pidfd_open(1234, 0);
+ret = pidfd_send_signal(pidfd, SIGSTOP, NULL, 0);
+
+With the introduction of pidfds through CLONE_PIDFD it is possible to
+created pidfds at process creation time.
+However, a lot of processes get created with traditional PID-based calls
+such as fork() or clone() (without CLONE_PIDFD). For these processes a
+caller can currently not create a pollable pidfd. This is a problem for
+Android's low memory killer (LMK) and service managers such as systemd.
+Both are examples of tools that want to make use of pidfds to get reliable
+notification of process exit for non-parents (pidfd polling) and race-free
+signal sending (pidfd_send_signal()). They intend to switch to this API for
+process supervision/management as soon as possible. Having no way to get
+pollable pidfds from PID-only processes is one of the biggest blockers for
+them in adopting this api. With pidfd_open() making it possible to retrieve
+pidfds for PID-based processes we enable them to adopt this api.
+
+In line with Arnd's recent changes to consolidate syscall numbers across
+architectures, I have added the pidfd_open() syscall to all architectures
+at the same time.
+
+Signed-off-by: Christian Brauner <christian@brauner.io>
+Reviewed-by: David Howells <dhowells@redhat.com>
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Acked-by: Arnd Bergmann <arnd@arndb.de>
+Cc: "Eric W. Biederman" <ebiederm@xmission.com>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Jann Horn <jannh@google.com>
+Cc: Andy Lutomirsky <luto@kernel.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Aleksa Sarai <cyphar@cyphar.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: linux-api@vger.kernel.org
+
+(cherry picked from commit 32fcb426ec001cb6d5a4a195091a8486ea77e2df)
+
+Conflicts:
+        kernel/pid.c
+
+(1. Replaced PIDTYPE_TGID with PIDTYPE_PID and thread_group_leader() check in pidfd_open() call
+ 2. Do not include <linux/sched/signal.h>)
+
+Bug: 135608568
+Test: test program using syscall(__NR_sys_pidfd_open,..) and poll()
+Change-Id: I52a93a73722d7f7754dae05f63b94b4ca4a71a75
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ include/linux/syscalls.h |  1 +
+ kernel/pid.c             | 71 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 72 insertions(+)
+
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index a9b23d64a2e..06c3550dbf7 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -885,6 +885,7 @@ asmlinkage long sys_open_by_handle_at(int mountdirfd,
+ 				      struct file_handle __user *handle,
+ 				      int flags);
+ asmlinkage long sys_setns(int fd, int nstype);
++asmlinkage long sys_pidfd_open(pid_t pid, unsigned int flags);
+ asmlinkage long sys_process_vm_readv(pid_t pid,
+ 				     const struct iovec __user *lvec,
+ 				     unsigned long liovcnt,
+diff --git a/kernel/pid.c b/kernel/pid.c
+index e6053982046..6e855d2011e 100644
+--- a/kernel/pid.c
++++ b/kernel/pid.c
+@@ -38,6 +38,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/proc_ns.h>
+ #include <linux/proc_fs.h>
++#include <linux/anon_inodes.h>
+ 
+ #define pid_hashfn(nr, ns)	\
+ 	hash_long((unsigned long)nr + (unsigned long)ns, pidhash_shift)
+@@ -568,6 +569,76 @@ struct pid *find_ge_pid(int nr, struct pid_namespace *ns)
+ 	return pid;
+ }
+ 
++/**
++ * pidfd_create() - Create a new pid file descriptor.
++ *
++ * @pid:  struct pid that the pidfd will reference
++ *
++ * This creates a new pid file descriptor with the O_CLOEXEC flag set.
++ *
++ * Note, that this function can only be called after the fd table has
++ * been unshared to avoid leaking the pidfd to the new process.
++ *
++ * Return: On success, a cloexec pidfd is returned.
++ *         On error, a negative errno number will be returned.
++ */
++static int pidfd_create(struct pid *pid)
++{
++	int fd;
++
++	fd = anon_inode_getfd("[pidfd]", &pidfd_fops, get_pid(pid),
++			      O_RDWR | O_CLOEXEC);
++	if (fd < 0)
++		put_pid(pid);
++
++	return fd;
++}
++
++/**
++ * pidfd_open() - Open new pid file descriptor.
++ *
++ * @pid:   pid for which to retrieve a pidfd
++ * @flags: flags to pass
++ *
++ * This creates a new pid file descriptor with the O_CLOEXEC flag set for
++ * the process identified by @pid. Currently, the process identified by
++ * @pid must be a thread-group leader. This restriction currently exists
++ * for all aspects of pidfds including pidfd creation (CLONE_PIDFD cannot
++ * be used with CLONE_THREAD) and pidfd polling (only supports thread group
++ * leaders).
++ *
++ * Return: On success, a cloexec pidfd is returned.
++ *         On error, a negative errno number will be returned.
++ */
++SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
++{
++	int fd, ret;
++	struct pid *p;
++	struct task_struct *tsk;
++
++	if (flags)
++		return -EINVAL;
++
++	if (pid <= 0)
++		return -EINVAL;
++
++	p = find_get_pid(pid);
++	if (!p)
++		return -ESRCH;
++
++	ret = 0;
++	rcu_read_lock();
++	tsk = pid_task(p, PIDTYPE_PID);
++	/* Check that pid belongs to a group leader task */
++	if (!tsk || !thread_group_leader(tsk))
++		ret = -EINVAL;
++	rcu_read_unlock();
++
++	fd = ret ?: pidfd_create(p);
++	put_pid(p);
++	return fd;
++}
++
+ /*
+  * The pid hash table is scaled according to the amount of memory in the
+  * machine.  From a minimum of 16 slots up to 4096 slots at one gigabyte or

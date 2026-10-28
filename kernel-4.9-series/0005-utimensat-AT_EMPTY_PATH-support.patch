@@ -1,0 +1,52 @@
+From 72aa13362a4ba7e3fb321fa50ab4792a3f03c0fc Mon Sep 17 00:00:00 2001
+From: Miklos Szeredi <mszeredi@redhat.com>
+Date: Tue, 27 Oct 2026 19:48:10 +0000
+Subject: [PATCH 05/14] utimensat: AT_EMPTY_PATH support
+
+This makes it possible to use utimensat on an O_PATH file (including
+symlinks).
+
+It supersedes the nonstandard utimensat(fd, NULL, ...) form.
+
+Cc: linux-api@vger.kernel.org
+Cc: linux-man@vger.kernel.org
+Signed-off-by: Miklos Szeredi <mszeredi@redhat.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+(cherry picked from commit 44a3b87444d2cdc1d4b5c22a5e0b8be0c6a8ee8d)
+
+Backport to 4.9: systemd 260 dropped its /proc/self/fd fallback and calls
+utimensat(fd, "", ts, AT_EMPTY_PATH) directly (futimens_opath(), used by udev
+and the tar importer). Applied as upstream.
+---
+ fs/utimes.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/fs/utimes.c b/fs/utimes.c
+index 87ce37bcaa8..b1816ae98ee 100644
+--- a/fs/utimes.c
++++ b/fs/utimes.c
+@@ -129,13 +129,13 @@ long do_utimes(int dfd, const char __user *filename, struct timespec *times,
+ 		goto out;
+ 	}
+ 
+-	if (flags & ~AT_SYMLINK_NOFOLLOW)
++	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH))
+ 		goto out;
+ 
+ 	if (filename == NULL && dfd != AT_FDCWD) {
+ 		struct fd f;
+ 
+-		if (flags & AT_SYMLINK_NOFOLLOW)
++		if (flags)
+ 			goto out;
+ 
+ 		f = fdget(dfd);
+@@ -151,6 +151,8 @@ long do_utimes(int dfd, const char __user *filename, struct timespec *times,
+ 
+ 		if (!(flags & AT_SYMLINK_NOFOLLOW))
+ 			lookup_flags |= LOOKUP_FOLLOW;
++		if (flags & AT_EMPTY_PATH)
++			lookup_flags |= LOOKUP_EMPTY;
+ retry:
+ 		error = user_path_at(dfd, filename, lookup_flags, &path);
+ 		if (error)

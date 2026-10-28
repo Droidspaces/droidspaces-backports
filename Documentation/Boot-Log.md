@@ -1,13 +1,18 @@
 # Reading the boot log
 
-Every line below was seen on the way to a clean boot. Find the line, apply the fix, boot
-again. Patch numbers are those of the 4.14 series. The 4.19 series has no patch 2, so from
-patch 3 on subtract one.
+Every line below was seen on the way to a clean 4.14 boot, except the two that say so.
+Find the line, apply the fix, boot again. Patch numbers are those of the 4.14 series. The 4.19 series has no patch 2, so from
+patch 3 on subtract one. The 4.9 series folds patches 4 and 5 into its patch 4, so from
+patch 6 on subtract one.
 
 **`Failed to spawn executor: Function not implemented` on every unit.** The kernel lacks
 `waitid(P_PIDFD)`. Patch 1. If the probe also says `pidfd_open no`, the kernel lacks the
-whole pidfd series and needs [`pidfd-backport-4.14/`](../pidfd-backport-4.14/README.md)
-first.
+whole pidfd series and needs [`pidfd-backport-4.9/`](../pidfd-backport-4.9/README.md) or
+[`pidfd-backport-4.14/`](../pidfd-backport-4.14/README.md) first.
+
+**PID 1 fails before any unit starts, `strace` shows `statx` returning ENOSYS.** A 4.9
+kernel without statx. Patch 4 of the 4.9 series. Not seen in a log yet, the 4.9 series has
+not been booted; this is what the source says will happen.
 
 **`Detected cgroup v1 hierarchy ... refusing execution`.** The guest sees a cgroup v1 mount
 under `/sys/fs/cgroup`. The runtime has to mount cgroup2 there; Droidspaces does.
@@ -34,7 +39,12 @@ A kernel build error, not a boot error. `RTM_MAX` was raised without the matchin
 rows. Patch 10 carries them; if you ported the change by hand, add the rows.
 
 **`Failed to determine whether /proc is a mount point` and PID 1 exits.** systemd 260 or
-newer on a kernel without the statx mount id. Patches 4 and 5.
+newer on a kernel without the statx mount id. Patches 4 and 5. On 4.9 the series' own
+statx patch carries both.
+
+**`run0`, `systemd-run -t` or `machinectl shell` cannot open a terminal.** The kernel lacks
+`TIOCGPTPEER`. 4.14 and 4.19 have it; on 4.9 it is patch 14 of the series. Also not seen
+in a log yet, for the same reason.
 
 **`Failed to close all file descriptors: Function not implemented`.** systemd 260 or newer
 on a kernel without `close_range`. Patches 8 and 9.

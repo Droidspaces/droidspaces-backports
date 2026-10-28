@@ -1,0 +1,167 @@
+From fe84579bf46eb345191b64a2860e00ca8eb96a9e Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian@brauner.io>
+Date: Fri, 24 May 2019 12:44:59 +0200
+Subject: [PATCH] BACKPORT: arch: wire-up pidfd_open()
+
+This wires up the pidfd_open() syscall into all arches at once.
+
+Signed-off-by: Christian Brauner <christian@brauner.io>
+Reviewed-by: David Howells <dhowells@redhat.com>
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Acked-by: Arnd Bergmann <arnd@arndb.de>
+Cc: "Eric W. Biederman" <ebiederm@xmission.com>
+Cc: Kees Cook <keescook@chromium.org>
+Cc: Joel Fernandes (Google) <joel@joelfernandes.org>
+Cc: Thomas Gleixner <tglx@linutronix.de>
+Cc: Jann Horn <jannh@google.com>
+Cc: Andy Lutomirsky <luto@kernel.org>
+Cc: Andrew Morton <akpm@linux-foundation.org>
+Cc: Aleksa Sarai <cyphar@cyphar.com>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: linux-api@vger.kernel.org
+Cc: linux-alpha@vger.kernel.org
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-ia64@vger.kernel.org
+Cc: linux-m68k@lists.linux-m68k.org
+Cc: linux-mips@vger.kernel.org
+Cc: linux-parisc@vger.kernel.org
+Cc: linuxppc-dev@lists.ozlabs.org
+Cc: linux-s390@vger.kernel.org
+Cc: linux-sh@vger.kernel.org
+Cc: sparclinux@vger.kernel.org
+Cc: linux-xtensa@linux-xtensa.org
+Cc: linux-arch@vger.kernel.org
+Cc: x86@kernel.org
+
+(cherry picked from commit 7615d9e1780e26e0178c93c55b73309a5dc093d7)
+
+Conflicts:
+
+        arch/alpha/kernel/syscalls/syscall.tbl
+        arch/arm/tools/syscall.tbl
+        arch/ia64/kernel/syscalls/syscall.tbl
+        arch/m68k/kernel/syscalls/syscall.tbl
+        arch/microblaze/kernel/syscalls/syscall.tbl
+        arch/mips/kernel/syscalls/syscall_n32.tbl
+        arch/mips/kernel/syscalls/syscall_n64.tbl
+        arch/mips/kernel/syscalls/syscall_o32.tbl
+        arch/parisc/kernel/syscalls/syscall.tbl
+        arch/powerpc/kernel/syscalls/syscall.tbl
+        arch/s390/kernel/syscalls/syscall.tbl
+        arch/sh/kernel/syscalls/syscall.tbl
+        arch/sparc/kernel/syscalls/syscall.tbl
+        arch/xtensa/kernel/syscalls/syscall.tbl
+        arch/x86/entry/syscalls/syscall_32.tbl
+        arch/x86/entry/syscalls/syscall_64.tbl
+        arch/arm/include/uapi/asm/unistd.h
+        arch/arm/kernel/calls.S
+
+(1. Skipped syscall.tbl modifications for missing architectures.
+ 2. Removed __ia32_sys_pidfd_open in arch/x86/entry/syscalls/syscall_32.tbl.
+ 3. Replaced __x64_sys_pidfd_open with sys_pidfd_open in arch/x86/entry/syscalls/syscall_64.tbl.
+ 4. Manually add __NR_pidfd_open definition into arch/arm/include/uapi/asm/unistd.h
+ 5. Manually add sys_pidfd_open syscall definition into arch/arm/kernel/calls.S)
+
+Bug: 135608568
+Test: test program using syscall(__NR_sys_pidfd_open,..) and poll()
+Change-Id: I294aa33dea5ed2662e077340281d7aa0452f7471
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+---
+ arch/arm/include/uapi/asm/unistd.h     | 1 +
+ arch/arm/kernel/calls.S                | 1 +
+ arch/arm64/include/asm/unistd.h        | 2 +-
+ arch/arm64/include/asm/unistd32.h      | 2 ++
+ arch/x86/entry/syscalls/syscall_32.tbl | 1 +
+ arch/x86/entry/syscalls/syscall_64.tbl | 1 +
+ include/uapi/asm-generic/unistd.h      | 4 +++-
+ 7 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/include/uapi/asm/unistd.h b/arch/arm/include/uapi/asm/unistd.h
+index 314100a06cc..7b8bf93c224 100644
+--- a/arch/arm/include/uapi/asm/unistd.h
++++ b/arch/arm/include/uapi/asm/unistd.h
+@@ -423,6 +423,7 @@
+ #define __NR_pkey_mprotect		(__NR_SYSCALL_BASE+394)
+ #define __NR_pkey_alloc			(__NR_SYSCALL_BASE+395)
+ #define __NR_pkey_free			(__NR_SYSCALL_BASE+396)
++#define __NR_pidfd_open		(__NR_SYSCALL_BASE+434)
+ 
+ /*
+  * The following SWIs are ARM private.
+diff --git a/arch/arm/kernel/calls.S b/arch/arm/kernel/calls.S
+index 08030b18f10..fa6e4dbb369 100644
+--- a/arch/arm/kernel/calls.S
++++ b/arch/arm/kernel/calls.S
+@@ -406,6 +406,7 @@
+ 		CALL(sys_pkey_mprotect)
+ /* 395 */	CALL(sys_pkey_alloc)
+ 		CALL(sys_pkey_free)
++		CALL(sys_pidfd_open)
+ #ifndef syscalls_counted
+ .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
+ #define syscalls_counted
+diff --git a/arch/arm64/include/asm/unistd.h b/arch/arm64/include/asm/unistd.h
+index e78ac26324b..63469acc599 100644
+--- a/arch/arm64/include/asm/unistd.h
++++ b/arch/arm64/include/asm/unistd.h
+@@ -44,7 +44,7 @@
+ #define __ARM_NR_compat_cacheflush	(__ARM_NR_COMPAT_BASE+2)
+ #define __ARM_NR_compat_set_tls		(__ARM_NR_COMPAT_BASE+5)
+ 
+-#define __NR_compat_syscalls		394
++#define __NR_compat_syscalls		435
+ #endif
+ 
+ #define __ARCH_WANT_SYS_CLONE
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index b7e8ef16ff0..0c04b767550 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -809,6 +809,8 @@ __SYSCALL(__NR_copy_file_range, sys_copy_file_range)
+ __SYSCALL(__NR_preadv2, compat_sys_preadv2)
+ #define __NR_pwritev2 393
+ __SYSCALL(__NR_pwritev2, compat_sys_pwritev2)
++#define __NR_pidfd_open 434
++__SYSCALL(__NR_pidfd_open, sys_pidfd_open)
+ 
+ /*
+  * Please add new compat syscalls above this comment and update
+diff --git a/arch/x86/entry/syscalls/syscall_32.tbl b/arch/x86/entry/syscalls/syscall_32.tbl
+index 6481734e7c5..d2e3f29a483 100644
+--- a/arch/x86/entry/syscalls/syscall_32.tbl
++++ b/arch/x86/entry/syscalls/syscall_32.tbl
+@@ -390,3 +390,4 @@
+ 381	i386	pkey_alloc		sys_pkey_alloc
+ 382	i386	pkey_free		sys_pkey_free
+ 424	i386	pidfd_send_signal	sys_pidfd_send_signal
++434	i386	pidfd_open		sys_pidfd_open
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index 31fd924f7a8..db0315d6667 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -339,6 +339,7 @@
+ 330	common	pkey_alloc		sys_pkey_alloc
+ 331	common	pkey_free		sys_pkey_free
+ 424	common	pidfd_send_signal	sys_pidfd_send_signal
++434	common	pidfd_open		sys_pidfd_open
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index c92e8bf21b4..9fb4a5707a3 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -732,9 +732,11 @@ __SYSCALL(__NR_pkey_alloc,    sys_pkey_alloc)
+ __SYSCALL(__NR_pkey_free,     sys_pkey_free)
+ #define __NR_pidfd_send_signal 424
+ __SYSCALL(__NR_pidfd_send_signal, sys_pidfd_send_signal)
++#define __NR_pidfd_open 434
++__SYSCALL(__NR_pidfd_open, sys_pidfd_open)
+ 
+ #undef __NR_syscalls
+-#define __NR_syscalls 425
++#define __NR_syscalls 435
+ 
+ /*
+  * All syscalls below here should go away really,

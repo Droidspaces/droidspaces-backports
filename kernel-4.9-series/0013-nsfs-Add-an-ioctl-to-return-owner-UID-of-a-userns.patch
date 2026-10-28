@@ -1,0 +1,92 @@
+From 5ba125746b8939a4a706ff09c063c11a848fc127 Mon Sep 17 00:00:00 2001
+From: "Michael Kerrisk (man-pages)" <mtk.manpages@gmail.com>
+Date: Wed, 25 Jan 2017 14:04:15 +1300
+Subject: [PATCH 13/14] nsfs: Add an ioctl() to return owner UID of a userns
+
+I'd like to write code that discovers the user namespace hierarchy on a
+running system, and also shows who owns the various user namespaces.
+Currently, there is no way of getting the owner UID of a user namespace.
+Therefore, this patch adds a new NS_GET_CREATOR_UID ioctl() that fetches
+the UID (as seen in the user namespace of the caller) of the creator of
+the user namespace referred to by the specified file descriptor.
+
+If the supplied file descriptor does not refer to a user namespace,
+the operation fails with the error EINVAL. If the owner UID does
+not have a mapping in the caller's user namespace return the
+overflow UID as that appears easier to deal with in practice
+in user-space applications.
+
+-- EWB Changed the handling of unmapped UIDs from -EOVERFLOW
+   back to the overflow uid.  Per conversation with
+   Michael Kerrisk after examining his test code.
+
+Acked-by: Andrey Vagin <avagin@openvz.org>
+Signed-off-by: Michael Kerrisk <mtk-manpages@gmail.com>
+Signed-off-by: Eric W. Biederman <ebiederm@xmission.com>
+(cherry picked from commit d95fa3c76a66b6d76b1e109ea505c55e66360f3c)
+
+Backport to 4.9: applies unchanged. Taken together with NS_GET_NSTYPE so
+the nsfs ioctl set matches v4.11.
+---
+ fs/nsfs.c                 | 11 +++++++++++
+ include/uapi/linux/nsfs.h |  8 +++++---
+ 2 files changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/fs/nsfs.c b/fs/nsfs.c
+index b0827a81147..45b4fb1da05 100644
+--- a/fs/nsfs.c
++++ b/fs/nsfs.c
+@@ -7,6 +7,7 @@
+ #include <linux/seq_file.h>
+ #include <linux/user_namespace.h>
+ #include <linux/nsfs.h>
++#include <linux/uaccess.h>
+ 
+ static struct vfsmount *nsfs_mnt;
+ 
+@@ -164,7 +165,10 @@ static int open_related_ns(struct ns_common *ns,
+ static long ns_ioctl(struct file *filp, unsigned int ioctl,
+ 			unsigned long arg)
+ {
++	struct user_namespace *user_ns;
+ 	struct ns_common *ns = get_proc_ns(file_inode(filp));
++	uid_t __user *argp;
++	uid_t uid;
+ 
+ 	switch (ioctl) {
+ 	case NS_GET_USERNS:
+@@ -175,6 +179,13 @@ static long ns_ioctl(struct file *filp, unsigned int ioctl,
+ 		return open_related_ns(ns, ns->ops->get_parent);
+ 	case NS_GET_NSTYPE:
+ 		return ns->ops->type;
++	case NS_GET_OWNER_UID:
++		if (ns->ops->type != CLONE_NEWUSER)
++			return -EINVAL;
++		user_ns = container_of(ns, struct user_namespace, ns);
++		argp = (uid_t __user *) arg;
++		uid = from_kuid_munged(current_user_ns(), user_ns->owner);
++		return put_user(uid, argp);
+ 	default:
+ 		return -ENOTTY;
+ 	}
+diff --git a/include/uapi/linux/nsfs.h b/include/uapi/linux/nsfs.h
+index 2b48df11056..1a3ca79f466 100644
+--- a/include/uapi/linux/nsfs.h
++++ b/include/uapi/linux/nsfs.h
+@@ -6,11 +6,13 @@
+ #define NSIO	0xb7
+ 
+ /* Returns a file descriptor that refers to an owning user namespace */
+-#define NS_GET_USERNS	_IO(NSIO, 0x1)
++#define NS_GET_USERNS		_IO(NSIO, 0x1)
+ /* Returns a file descriptor that refers to a parent namespace */
+-#define NS_GET_PARENT	_IO(NSIO, 0x2)
++#define NS_GET_PARENT		_IO(NSIO, 0x2)
+ /* Returns the type of namespace (CLONE_NEW* value) referred to by
+    file descriptor */
+-#define NS_GET_NSTYPE	_IO(NSIO, 0x3)
++#define NS_GET_NSTYPE		_IO(NSIO, 0x3)
++/* Get owner UID (in the caller's user namespace) for a user namespace */
++#define NS_GET_OWNER_UID	_IO(NSIO, 0x4)
+ 
+ #endif /* __LINUX_NSFS_H */

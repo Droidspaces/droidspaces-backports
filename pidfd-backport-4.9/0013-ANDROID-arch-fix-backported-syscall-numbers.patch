@@ -1,0 +1,78 @@
+From ed3eafebbda6f318c8a2854aab9d0b77c72bc4f8 Mon Sep 17 00:00:00 2001
+From: Suren Baghdasaryan <surenb@google.com>
+Date: Thu, 9 Jun 2022 10:34:08 -0700
+Subject: [PATCH] ANDROID: arch: fix backported syscall numbers
+
+Syscall numbers for pidfd_send_signal and pidfd_open are incorrect due
+to the syscalls missing in 4.9 kernel. Fill these syscall number gaps
+in calls.S.
+
+Bug: 234392424
+Signed-off-by: Suren Baghdasaryan <surenb@google.com>
+Change-Id: Ib3d3d583c930bdf8cfccbf723755773debf5d262
+---
+ arch/arm/include/asm/unistd.h |  2 +-
+ arch/arm/kernel/calls.S       | 36 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/include/asm/unistd.h b/arch/arm/include/asm/unistd.h
+index ada0d29a660..30dc381ecac 100644
+--- a/arch/arm/include/asm/unistd.h
++++ b/arch/arm/include/asm/unistd.h
+@@ -19,7 +19,7 @@
+  * This may need to be greater than __NR_last_syscall+1 in order to
+  * account for the padding in the syscall table
+  */
+-#define __NR_syscalls  (400)
++#define __NR_syscalls  (436)
+ 
+ #define __ARCH_WANT_STAT64
+ #define __ARCH_WANT_SYS_GETHOSTNAME
+diff --git a/arch/arm/kernel/calls.S b/arch/arm/kernel/calls.S
+index 4585cdf35e8..03977a3092d 100644
+--- a/arch/arm/kernel/calls.S
++++ b/arch/arm/kernel/calls.S
+@@ -406,7 +406,43 @@
+ 		CALL(sys_pkey_mprotect)
+ /* 395 */	CALL(sys_pkey_alloc)
+ 		CALL(sys_pkey_free)
++		CALL(sys_ni_syscall)	/* for sys_statx */
++		CALL(sys_ni_syscall)	/* for sys_rseq */
++		CALL(sys_ni_syscall)	/* for sys_io_pgetevents_time32 */
++/* 400 */	CALL(sys_ni_syscall)	/* for sys_migrate_pages */
++		CALL(sys_ni_syscall)	/* for sys_kexec_file_load */
++		CALL(sys_ni_syscall)	/* unused */
++		CALL(sys_ni_syscall)	/* for sys_clock_gettime */
++		CALL(sys_ni_syscall)	/* for sys_clock_settime */
++/* 405 */	CALL(sys_ni_syscall)	/* for sys_clock_adjtime */
++		CALL(sys_ni_syscall)	/* for sys_clock_getres */
++		CALL(sys_ni_syscall)	/* for sys_clock_nanosleep */
++		CALL(sys_ni_syscall)	/* for sys_timer_gettime */
++		CALL(sys_ni_syscall)	/* for sys_timer_settime */
++/* 410 */	CALL(sys_ni_syscall)	/* for sys_timerfd_gettime */
++		CALL(sys_ni_syscall)	/* for sys_timerfd_settime */
++		CALL(sys_ni_syscall)	/* for sys_utimensat */
++		CALL(sys_ni_syscall)	/* for sys_pselect6 */
++		CALL(sys_ni_syscall)	/* for sys_ppoll */
++/* 415*/	CALL(sys_ni_syscall)	/* unused */
++		CALL(sys_ni_syscall)	/* for sys_io_pgetevents */
++		CALL(sys_ni_syscall)	/* for sys_recvmmsg */
++		CALL(sys_ni_syscall)	/* for sys_mq_timedsend */
++		CALL(sys_ni_syscall)	/* for sys_mq_timedreceive */
++/* 420 */	CALL(sys_ni_syscall)	/* for sys_semtimedop */
++		CALL(sys_ni_syscall)	/* for sys_rt_sigtimedwait */
++		CALL(sys_ni_syscall)	/* for sys_futex */
++		CALL(sys_ni_syscall)	/* for sys_sched_rr_get_interval */
+ 		CALL(sys_pidfd_send_signal)
++/* 425 */	CALL(sys_ni_syscall)	/* for sys_io_uring_setup */
++		CALL(sys_ni_syscall)	/* for sys_io_uring_enter */
++		CALL(sys_ni_syscall)	/* for sys_io_uring_register */
++		CALL(sys_ni_syscall)	/* for sys_open_tree */
++		CALL(sys_ni_syscall)	/* for sys_move_mount */
++/* 430 */	CALL(sys_ni_syscall)	/* for sys_fsopen */
++		CALL(sys_ni_syscall)	/* for sys_fsconfig */
++		CALL(sys_ni_syscall)	/* for sys_fsmount */
++		CALL(sys_ni_syscall)	/* for sys_fspick */
+ 		CALL(sys_pidfd_open)
+ #ifndef syscalls_counted
+ .equ syscalls_padding, ((NR_syscalls + 3) & ~3) - NR_syscalls
