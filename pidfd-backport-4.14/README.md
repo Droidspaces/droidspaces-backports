@@ -6,7 +6,7 @@ Twelve patches, Google's own Android R backport of the pidfd work, taken from th
 and without them nothing else in this repository helps: systemd 258 needs `pidfd_open()`,
 `CLONE_PIDFD` and pidfd polling before anything else comes into play.
 
-Run `tools/probe-kernel.sh <your tree> HEAD` first. If it prints `pidfd_open yes`, you do
+Run `tools/probe-kernel.sh <your tree>` first. If it prints `pidfd_open yes`, you do
 not need this directory.
 
 ## The patches

@@ -6,7 +6,7 @@ Every Android 4.19 kernel already has the Android R pidfd backport, so unlike 4.
 no prerequisite series. The changes are the same as the 4.14 series, ported fresh against
 4.19 context.
 
-Run `tools/probe-kernel.sh <your tree> HEAD` first. Vendor 4.19 kernels differ in what they
+Run `tools/probe-kernel.sh <your tree>` first. Vendor 4.19 kernels differ in what they
 already have. If the probe prints `yes` for a feature below, skip that patch.
 
 ## The patches

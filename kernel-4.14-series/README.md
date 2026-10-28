@@ -4,7 +4,7 @@ Ten patches. Together they are everything a 4.14 Android kernel with the Android
 backport is missing to run systemd 258 through 262 as a Droidspaces guest. Every hunk is
 written so that vendor additions in the same functions do not get in the way.
 
-Run `tools/probe-kernel.sh <your tree> HEAD` first. If it prints `pidfd_open no`, apply
+Run `tools/probe-kernel.sh <your tree>` first. If it prints `pidfd_open no`, apply
 [`pidfd-backport-4.14/`](../pidfd-backport-4.14/README.md) before this series. If it prints
 `yes` for a feature below, skip that patch.
 

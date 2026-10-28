@@ -39,7 +39,7 @@ networkd, resolve DNS through resolved, and report nothing worse than `Tainted: 
    patches add, and works on a blobless clone.
 
    ```
-   tools/probe-kernel.sh <git dir> <rev>
+   tools/probe-kernel.sh <kernel dir>
    ```
 
 2. On 4.14, if the probe says `pidfd_open no`, apply

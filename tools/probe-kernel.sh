@@ -1,11 +1,24 @@
 #!/bin/bash
-# Usage: probe-kernel.sh <git dir> <rev>
+# Usage: probe-kernel.sh <kernel dir> [rev]
 # Prints one line per kernel feature systemd 258 to 262 cares about: "yes" or "no".
-# Works on a blobless clone, every probe fetches only the one file it reads.
-d=$1; rev=${2:-FETCH_HEAD}
-has() { git -C "$d" show "$rev:$1" 2>/dev/null | grep -qE -- "$2" && echo yes || echo no; }
-ver=$(git -C "$d" show "$rev:Makefile" | sed -n 2,4p | awk '{print $3}' | paste -sd.)
-echo "kernel $ver"
+#
+# Without a rev it reads the files in the directory as they are, so it works on a plain
+# checkout, on a kernel that sits in a subdirectory of its repository, and on patches that
+# are applied but not committed. With a rev it reads that commit through git, which also
+# works on a blobless clone because every probe fetches only the one file it reads.
+[ -n "$1" ] || { echo "usage: $0 <kernel dir> [rev]" >&2; exit 1; }
+d=$1; rev=$2
+[ -e "$d/Makefile" ] || [ -n "$rev" ] || { echo "$d: no Makefile here, is this a kernel tree?" >&2; exit 1; }
+if [ -n "$rev" ]; then
+    prefix=$(git -C "$d" rev-parse --show-prefix 2>/dev/null) || { echo "$d: not a git repository" >&2; exit 1; }
+    git -C "$d" rev-parse -q --verify "$rev^{commit}" >/dev/null || { echo "$d: no such revision $rev" >&2; exit 1; }
+    read_file() { git -C "$d" show "$rev:$prefix$1" 2>/dev/null; }
+else
+    read_file() { cat "$d/$1" 2>/dev/null; }
+fi
+has() { read_file "$1" | grep -qE -- "$2" && echo yes || echo no; }
+ver=$(read_file Makefile | sed -n 2,4p | awk '{print $3}' | paste -sd.)
+echo "kernel ${ver:-unknown}"
 printf "%-28s %s\n" statx                 "$(has fs/stat.c 'SYSCALL_DEFINE5\(statx')"
 printf "%-28s %s\n" TIOCGPTPEER           "$(has include/uapi/asm-generic/ioctls.h TIOCGPTPEER)"
 printf "%-28s %s\n" NS_GET_NSTYPE         "$(has include/uapi/linux/nsfs.h NS_GET_NSTYPE)"

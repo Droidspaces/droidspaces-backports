@@ -10,7 +10,7 @@ Android kernels carry backports that mainline stable does not, and vendor kernel
 whatever stable point the SoC vendor froze on. The version number alone tells you little.
 
 ```
-tools/probe-kernel.sh <git dir> <rev>
+tools/probe-kernel.sh <kernel dir>
 ```
 
 Each `no` is a patch you need, each `yes` a patch you skip. The pidfd lines matter most on
