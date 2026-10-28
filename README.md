@@ -1,7 +1,7 @@
 # Modern systemd on old Android kernels
 
 Kernel patches that let a [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS)
-container boot systemd 258 through 262 on an Android 4.9, 4.14 or 4.19 kernel.
+container boot systemd 258 through 262 on an Android 4.9, 4.14, 4.19 or 5.4 kernel.
 
 systemd 258 raised its kernel baseline to 5.4 and 260 raised it to 5.10. The fallbacks that
 let it run on anything older are gone from the code. The patches here put back the handful
@@ -30,7 +30,7 @@ networkd, resolve DNS through resolved, and report nothing worse than `Tainted: 
 
 ## What you need
 
-- A 4.9, 4.14 or 4.19 Android kernel tree you can build. For 5.4 or a vendor tree that
+- A 4.9, 4.14, 4.19 or 5.4 Android kernel tree you can build. For a vendor tree that
   rejects a patch, read the [porting page](Documentation/Porting.md).
 - Droidspaces newer than 7.1.0. Part of the fix lives in the runtime, not the kernel, and
   landed in [commit 3132cc93](https://github.com/ravindu644/Droidspaces-OSS/commit/3132cc9311c5e2582a9c47c40476925b3a9a2c57).
@@ -51,16 +51,17 @@ networkd, resolve DNS through resolved, and report nothing worse than `Tainted: 
    [`pidfd-backport-4.14/`](pidfd-backport-4.14/README.md). Vendor trees frozen before
    mid 2019 need it; newer ones and every 4.19 do not.
 3. Apply the series for your kernel: [`kernel-4.9-series/`](kernel-4.9-series/README.md),
-   [`kernel-4.14-series/`](kernel-4.14-series/README.md) or
-   [`kernel-4.19-series/`](kernel-4.19-series/README.md). Skip any patch whose feature
-   the probe already reports as `yes`.
+   [`kernel-4.14-series/`](kernel-4.14-series/README.md),
+   [`kernel-4.19-series/`](kernel-4.19-series/README.md) or
+   [`kernel-5.4-series/`](kernel-5.4-series/README.md). Skip any patch whose feature the
+   probe already reports as `yes`. 5.4 only needs its series for systemd 260 and newer.
 4. Build, boot a systemd guest, and if anything is red, look it up on the
    [boot log page](Documentation/Boot-Log.md).
 
 ## Documentation
 
 - [Porting](Documentation/Porting.md): applying the patches to a tree that is not one of
-  the tested ones, including 5.4, and which trees were tested.
+  the tested ones, and which trees were tested.
 - [Boot log](Documentation/Boot-Log.md): what each error line means and which patch fixes it.
 - [Internals](Documentation/Internals.md): why systemd needs each of these features, read
   out of its source, and why the new mount API is handled in Droidspaces rather than in the

@@ -6,11 +6,12 @@ anything. `CLAUDE.md` is a symlink to this file.
 ## What this is
 
 Kernel patches that let a Droidspaces guest boot systemd 258 through 262 on an Android 4.9,
-4.14 or 4.19 kernel, and the documents that explain them. There is no build system, no CI, no
+4.14, 4.19 or 5.4 kernel, and the documents that explain them. There is no build system, no CI, no
 test suite and no code of its own apart from one shell script. The content is:
 
-- `kernel-4.9-series/`, `kernel-4.14-series/`, `kernel-4.19-series/`: the `git
-  format-patch` files for one kernel version each, plus a README that lists them.
+- `kernel-4.9-series/`, `kernel-4.14-series/`, `kernel-4.19-series/`,
+  `kernel-5.4-series/`: the `git format-patch` files for one kernel version each, plus a
+  README that lists them.
 - `pidfd-backport-4.9/`, `pidfd-backport-4.14/`: Google's pidfd backport for trees that
   never got it, plus a README. The 4.9 one carries two alternate patches for 4.9.1xx trees
   under `alt-4.9.1xx/`.
@@ -64,9 +65,10 @@ and compiled. Treat it as a build artifact, not a source file.
   file.
 - Mainline cherry-picks keep the original author, date, subject and body, and carry the
   `(cherry picked from commit <full hash>)` line that `git cherry-pick -x` adds. Below
-  that line, a short paragraph starting `Backport to 4.14:` or `Backport to 4.19:` says
+  that line, a short paragraph starting `Backport to 4.14:` (or the series' version) says
   what was changed and why, and a `Conflicts:` line names the files that needed hand
-  placement. Nothing else goes into the body.
+  placement. The 5.4 series carries the same note in a `[ported by hand: ...]` block
+  instead; either form is fine, nothing else goes into the body.
 - The original patches, the nexthop stub in every series, the reduced statx on 4.9 and the
   `frozen 0` line on 4.9, keep their own author and explain the problem they solve in
   their body. Do not rewrite them into cherry-picks.
@@ -180,7 +182,7 @@ findings, as in the boot log page, and nothing else.
   Prefixes, matching the history:
   - `docs:` for anything under `Documentation/` or a README
   - `probe:` for `tools/probe-kernel.sh`
-  - `4.9:`, `4.14:`, `4.19:`, `pidfd:` for a change to a patch in that directory
+  - `4.9:`, `4.14:`, `4.19:`, `5.4:`, `pidfd:` for a change to a patch in that directory
   - `fix:` only when the commit corrects something that was wrong, and say what was wrong
 - The body says what was wrong, what changed, and on which tree it was checked. It does
   not list the files, git does that.

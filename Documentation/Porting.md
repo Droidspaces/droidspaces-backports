@@ -1,8 +1,7 @@
 # Porting to your own tree
 
-Read this when a patch rejects on your tree, or when your kernel is 5.4, which has no
-ready series. Everything here comes from applying the series to Google's common kernels
-and eight vendor trees, and from booting two of them.
+Read this when a patch rejects on your tree. Everything here comes from applying the
+series to Google's common kernels and ten vendor trees, and from booting two of them.
 
 ## Start with the probe
 
@@ -23,12 +22,11 @@ Android 4.19 kernel has the backport, because 4.19 shipped after it landed.
 
 **5.10 and newer.** Nothing. systemd 262 boots unmodified.
 
-**5.4.** Runs systemd 258 and 259 as is. For 260 and newer it needs the three 5.8 and 5.9
-pieces: the statx mount id and mount root, `AT_EMPTY_PATH` for utimensat and faccessat2,
-and `close_range`. The mount API and nexthops are present, so neither the Droidspaces fix
-nor the nexthop patch is involved. The patch files here are written against 4.14 and 4.19
-context and do not apply to 5.4; cherry-pick the mainline commits named in the
-[4.19 series README](../kernel-4.19-series/README.md) instead.
+**5.4.** Runs systemd 258 and 259 as is. For 260 and newer it needs the
+[5.4 series](../kernel-5.4-series/README.md): the statx mount id and mount root,
+`AT_EMPTY_PATH` for utimensat and faccessat2, and `close_range`. The mount API, nexthops
+and the freezer are present, so neither the Droidspaces fix nor the nexthop or `frozen 0`
+patches are involved. Compile-tested on Google's tree and two vendor trees, not booted.
 
 **4.19.** The [4.19 series](../kernel-4.19-series/README.md), as is. Compile-tested on
 Google's tree and applied to four vendor trees, not booted.
@@ -112,8 +110,16 @@ another series, these are the places vendors differ.
   `AT_EACCESS` block after it, before `AT_SYMLINK_FOLLOW`, not inside the comment. Getting
   this wrong fails every file that includes fcntl.h.
 - **`fs/file.c`.** 4.9's and 4.14's `__close_fd()` still clear the close-on-exec bit
-  themselves, so keep that line in `pick_file()`. 4.19's does not. Neither has `__close_fd_get_file()`, which
-  mainline's hunk context carries from the io_uring work.
+  themselves, so keep that line in `pick_file()`. 4.19's does not. Neither has
+  `__close_fd_get_file()`, which mainline's hunk context carries from the io_uring work.
+  5.4 has it, right after `__close_fd()`, where mainline 5.9 had `do_close_on_exec()`, so
+  on 5.4 the hunk anchors on that instead.
+- **Syscall tables on 5.4.** Every Android 5.4 tree already has `process_madvise` at 440
+  and both counts at 441, so drop the count hunks. Put 436 and 439 before the `clone3`
+  rows: after them Google jumps straight to 440, LineageOS keeps the mainline "reserved
+  for" comments, Samsung has its own 436, so no context after `clone3` is shared. The
+  generators sort by number and the `__SYSCALL()` lines are array designators, so the
+  order in the file does not matter.
 - **`security/selinux/nlmsgtab.c`.** Any change to `RTM_MAX` needs matching rows and a moved
   `BUILD_BUG_ON`, or the build fails at link time under LTO with an undefined
   `__compiletime_assert_NNN`.
@@ -147,7 +153,10 @@ clones, and the Google trees also had their touched objects compiled.
   Fedora 44 and Arch Linux ARM.
 - Google `android-4.9-p-release`, 4.9.118, and `android-4.9-p`, 4.9.299, both after the
   pidfd backport.
+- Google `android12-5.4`, 5.4.302.
+- OnePlus Nord N200, `chararomandroid/android_kernel_oneplus_sm4350`, 5.4.300.
+- Samsung Galaxy A52s 5G, `bone-machine/android_kernel_samsung_sm7325_a52s_5g`, 5.4.289,
+  which already has `close_range`.
 
 The series READMEs say per tree which patches applied, which compiled, and what, if
-anything, was skipped. 5.4 only had the probe run and an apply check that showed the patch
-files need re-porting there.
+anything, was skipped.

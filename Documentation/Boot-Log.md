@@ -3,7 +3,8 @@
 Every line below was seen on the way to a clean boot on 4.14 or 4.9, except the two that
 say so. Find the line, apply the fix, boot again. Patch numbers are those of the 4.14 series. The 4.19 series has no patch 2, so from
 patch 3 on subtract one. The 4.9 series folds patches 4 and 5 into its patch 4, so from
-patch 6 on subtract one.
+patch 6 on subtract one. The 5.4 series is patches 4 to 9 of the 4.14 series numbered 1 to
+6.
 
 **`Failed to spawn executor: Function not implemented` on every unit.** The kernel lacks
 `waitid(P_PIDFD)`. Patch 1. If the probe also says `pidfd_open no`, the kernel lacks the
@@ -40,7 +41,8 @@ rows. Patch 10 carries them; if you ported the change by hand, add the rows.
 
 **`Failed to determine whether /proc is a mount point` and PID 1 exits.** systemd 260 or
 newer on a kernel without the statx mount id. Patches 4 and 5. On 4.9 the series' own
-statx patch carries both.
+statx patch carries both. On 5.4 the line ends in `Protocol driver not attached` and is
+followed by `Failed to mount API filesystems`; patches 1 and 2 of the 5.4 series.
 
 **`run0`, `systemd-run -t` or `machinectl shell` cannot open a terminal.** The kernel lacks
 `TIOCGPTPEER`. 4.14 and 4.19 have it; on 4.9 it is patch 14 of the series. Also not seen

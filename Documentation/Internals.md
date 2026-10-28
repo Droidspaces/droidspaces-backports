@@ -126,7 +126,8 @@ nothing on a container kernel.
 
 ## What systemd 260 adds
 
-On top of everything above. A stock 5.4 kernel is missing exactly these.
+On top of everything above. A stock 5.4 kernel is missing exactly these, and the
+[5.4 series](../kernel-5.4-series/README.md) is nothing but them.
 
 **`close_range`** (kernel 5.9, syscall 436). `close_all_fds()` runs in the child of every
 `safe_fork()` with `FORK_CLOSE_ALL_FDS`, which is nearly every fork in systemd, and the

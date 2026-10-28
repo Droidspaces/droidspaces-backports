@@ -1,0 +1,47 @@
+From e6af32784203a40faf4dd296dd513001d91bfaaf Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 19:48:57 +0000
+Subject: [PATCH 7/7] x86: wire-up close_range and faccessat2
+
+The two syscalls were added for arm, arm64 and the asm-generic table in the
+previous patches. This adds the x86 rows from mainline 5.8 and 5.9, which
+only matter for an x86 build such as the Cuttlefish emulator.
+
+It is a separate patch because the x86 tables in vendor 5.4 trees differ
+from Google's: the LineageOS sm4350 tree spells its process_madvise row
+without the __x64_sys_ prefix and carries the mainline "reserved for"
+comments between 435 and 440, so this hunk is the one most likely to need
+a hand edit. Skip it on a kernel that is only built for arm64.
+
+Rows taken from mainline commits 9b4feb630e8e (close_range) and
+c8ffd8bcdd28 (faccessat2).
+---
+ arch/x86/entry/syscalls/syscall_32.tbl | 2 ++
+ arch/x86/entry/syscalls/syscall_64.tbl | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/arch/x86/entry/syscalls/syscall_32.tbl b/arch/x86/entry/syscalls/syscall_32.tbl
+index 0e2d912c65a8..b6aba7dbd13d 100644
+--- a/arch/x86/entry/syscalls/syscall_32.tbl
++++ b/arch/x86/entry/syscalls/syscall_32.tbl
+@@ -439,4 +439,6 @@
+ 432	i386	fsmount			sys_fsmount			__ia32_sys_fsmount
+ 433	i386	fspick			sys_fspick			__ia32_sys_fspick
+ 434	i386	pidfd_open		sys_pidfd_open			__ia32_sys_pidfd_open
++436	i386	close_range		sys_close_range			__ia32_sys_close_range
++439	i386	faccessat2		sys_faccessat2			__ia32_sys_faccessat2
+ 435	i386	clone3			sys_clone3			__ia32_sys_clone3
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index 14213fcdad0d..0b6ac2f64057 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -356,4 +356,6 @@
+ 432	common	fsmount			__x64_sys_fsmount
+ 433	common	fspick			__x64_sys_fspick
+ 434	common	pidfd_open		__x64_sys_pidfd_open
++436	common	close_range		__x64_sys_close_range
++439	common	faccessat2		__x64_sys_faccessat2
+ 435	common	clone3			__x64_sys_clone3/ptregs
+-- 
+2.43.0
+

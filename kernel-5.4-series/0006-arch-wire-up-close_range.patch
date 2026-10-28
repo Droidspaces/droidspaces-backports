@@ -1,0 +1,85 @@
+From feb01b225ba7126781d7f5ee48a2ee147eb5126b Mon Sep 17 00:00:00 2001
+From: Christian Brauner <christian.brauner@ubuntu.com>
+Date: Wed, 28 Oct 2026 19:48:56 +0000
+Subject: [PATCH 6/7] arch: wire-up close_range()
+
+This wires up the close_range() syscall into all arches at once.
+
+Suggested-by: Arnd Bergmann <arnd@arndb.de>
+Signed-off-by: Christian Brauner <christian.brauner@ubuntu.com>
+Reviewed-by: Oleg Nesterov <oleg@redhat.com>
+Acked-by: Arnd Bergmann <arnd@arndb.de>
+Acked-by: Michael Ellerman <mpe@ellerman.id.au> (powerpc)
+Cc: Jann Horn <jannh@google.com>
+Cc: David Howells <dhowells@redhat.com>
+Cc: Dmitry V. Levin <ldv@altlinux.org>
+Cc: Linus Torvalds <torvalds@linux-foundation.org>
+Cc: Al Viro <viro@zeniv.linux.org.uk>
+Cc: Florian Weimer <fweimer@redhat.com>
+Cc: linux-api@vger.kernel.org
+Cc: linux-alpha@vger.kernel.org
+Cc: linux-arm-kernel@lists.infradead.org
+Cc: linux-ia64@vger.kernel.org
+Cc: linux-m68k@lists.linux-m68k.org
+Cc: linux-mips@vger.kernel.org
+Cc: linux-parisc@vger.kernel.org
+Cc: linuxppc-dev@lists.ozlabs.org
+Cc: linux-s390@vger.kernel.org
+Cc: linux-sh@vger.kernel.org
+Cc: sparclinux@vger.kernel.org
+Cc: linux-xtensa@linux-xtensa.org
+Cc: linux-arch@vger.kernel.org
+Cc: x86@kernel.org
+
+(cherry picked from commit 9b4feb630e8e9801603f3cab3a36369e3c1cf88d)
+[ported by hand: only the arm, arm64 compat and asm-generic tables, the
+ x86 rows are in a separate patch. Android 5.4 trees already have
+ process_madvise at 440 and the counts at 441, so the counts are left
+ alone and 436 goes in next to 439, before the clone3 lines, the one spot every 5.4
+ tree spells the same way; the generators sort by number.]
+---
+ arch/arm/tools/syscall.tbl        | 1 +
+ arch/arm64/include/asm/unistd32.h | 2 ++
+ include/uapi/asm-generic/unistd.h | 2 ++
+ 3 files changed, 5 insertions(+)
+
+diff --git a/arch/arm/tools/syscall.tbl b/arch/arm/tools/syscall.tbl
+index 080d2c901589..c6d07c84d4d2 100644
+--- a/arch/arm/tools/syscall.tbl
++++ b/arch/arm/tools/syscall.tbl
+@@ -448,5 +448,6 @@
+ 432	common	fsmount				sys_fsmount
+ 433	common	fspick				sys_fspick
+ 434	common	pidfd_open			sys_pidfd_open
++436	common	close_range			sys_close_range
+ 439	common	faccessat2			sys_faccessat2
+ 435	common	clone3				sys_clone3
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index b46b5d8aaa50..0baa90c9be57 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -877,6 +877,8 @@ __SYSCALL(__NR_fsmount, sys_fsmount)
+ __SYSCALL(__NR_fspick, sys_fspick)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
++#define __NR_close_range 436
++__SYSCALL(__NR_close_range, sys_close_range)
+ #define __NR_faccessat2 439
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ #define __NR_clone3 435
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index 0f4d1f91d634..5b1282c94a89 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -846,6 +846,8 @@ __SYSCALL(__NR_fsmount, sys_fsmount)
+ __SYSCALL(__NR_fspick, sys_fspick)
+ #define __NR_pidfd_open 434
+ __SYSCALL(__NR_pidfd_open, sys_pidfd_open)
++#define __NR_close_range 436
++__SYSCALL(__NR_close_range, sys_close_range)
+ #define __NR_faccessat2 439
+ __SYSCALL(__NR_faccessat2, sys_faccessat2)
+ #ifdef __ARCH_WANT_SYS_CLONE3
+-- 
+2.43.0
+
